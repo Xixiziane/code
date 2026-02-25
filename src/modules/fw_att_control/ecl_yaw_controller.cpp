@@ -42,6 +42,9 @@
 #include <float.h>
 #include <lib/geo/geo.h>
 #include <mathlib/mathlib.h>
+#include <matrix/math.hpp>
+
+using matrix::wrap_pi;
 
 float ECL_YawController::control_attitude(const float dt, const ECL_ControlData &ctl_data)
 {
@@ -93,6 +96,19 @@ float ECL_YawController::control_attitude(const float dt, const ECL_ControlData 
 	if (!PX4_ISFINITE(_body_rate_setpoint)) {
 		PX4_WARN("yaw rate sepoint not finite");
 		_body_rate_setpoint = 0.0f;
+	}
+
+	/* Heading hold for chain-wing yaw stabilization:
+	 * Add a yaw rate correction proportional to heading error.
+	 * This extends yaw control from pure coordinated-turn to active heading tracking,
+	 * providing the yaw self-stabilization needed for chain-wing combined flight mode.
+	 */
+	if (_heading_hold_gain > FLT_EPSILON &&
+	    PX4_ISFINITE(ctl_data.yaw_setpoint) && PX4_ISFINITE(ctl_data.yaw)) {
+		const float heading_error = wrap_pi(ctl_data.yaw_setpoint - ctl_data.yaw);
+		const float heading_rate_correction = heading_error * _heading_hold_gain;
+		_body_rate_setpoint += math::constrain(heading_rate_correction, -_max_rate, _max_rate);
+		_body_rate_setpoint = math::constrain(_body_rate_setpoint, -_max_rate, _max_rate);
 	}
 
 	return _body_rate_setpoint;

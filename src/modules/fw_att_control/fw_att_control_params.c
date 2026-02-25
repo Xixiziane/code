@@ -266,3 +266,25 @@ PARAM_DEFINE_FLOAT(FW_MAN_R_MAX, 45.0f);
  * @group FW Attitude Control
  */
 PARAM_DEFINE_FLOAT(FW_MAN_P_MAX, 30.0f);
+
+/**
+ * Yaw heading hold gain (chain-wing stabilization)
+ *
+ * When set to a value greater than zero, this enables an active yaw heading hold
+ * controller that adds a yaw rate correction proportional to the heading error.
+ * This is designed for chain-wing (multi-body linked fixed-wing) aircraft that need
+ * enhanced yaw stability through differential thrust and rudder control.
+ *
+ * The heading hold works in conjunction with the existing coordinated turn controller
+ * and differential thrust mixing. Set to 0 to disable (default standard plane behavior).
+ *
+ * Typical values for chain-wing: 1.0 to 3.0
+ *
+ * @unit 1/s
+ * @min 0.0
+ * @max 5.0
+ * @decimal 2
+ * @increment 0.1
+ * @group FW Attitude Control
+ */
+PARAM_DEFINE_FLOAT(FW_YAW_STAB_SC, 0.0f);

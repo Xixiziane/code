@@ -155,9 +155,14 @@ private:
 		(ParamFloat<px4::params::FW_WR_IMAX>) _param_fw_wr_imax,
 		(ParamFloat<px4::params::FW_WR_P>) _param_fw_wr_p,
 
-		(ParamFloat<px4::params::FW_Y_RMAX>) _param_fw_y_rmax
+		(ParamFloat<px4::params::FW_Y_RMAX>) _param_fw_y_rmax,
+
+		(ParamFloat<px4::params::FW_YAW_STAB_SC>) _param_fw_yaw_stab_sc
 
 	)
+
+	float _heading_setpoint{0.f};
+	bool _heading_setpoint_initialized{false};
 
 	ECL_RollController _roll_ctrl;
 	ECL_PitchController _pitch_ctrl;

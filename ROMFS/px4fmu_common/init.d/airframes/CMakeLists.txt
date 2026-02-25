@@ -44,6 +44,7 @@ px4_add_romfs_files(
 	# [2000, 2999] Standard planes"
 	2100_standard_plane
 	2106_albatross
+	2150_chainwing
 
 	2507_cloudship
 

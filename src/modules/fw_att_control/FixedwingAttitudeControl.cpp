@@ -82,6 +82,8 @@ FixedwingAttitudeControl::parameters_update()
 	_wheel_ctrl.set_k_ff(_param_fw_wr_ff.get());
 	_wheel_ctrl.set_integrator_max(_param_fw_wr_imax.get());
 	_wheel_ctrl.set_max_rate(radians(_param_fw_w_rmax.get()));
+
+	_yaw_ctrl.set_heading_hold_gain(_param_fw_yaw_stab_sc.get());
 }
 
 void
@@ -103,7 +105,18 @@ FixedwingAttitudeControl::vehicle_manual_poll(const float yaw_body)
 				_att_sp.pitch_body = constrain(_att_sp.pitch_body,
 							       -radians(_param_fw_man_p_max.get()), radians(_param_fw_man_p_max.get()));
 
-				_att_sp.yaw_body = yaw_body; // yaw is not controlled, so set setpoint to current yaw
+				if (_param_fw_yaw_stab_sc.get() > FLT_EPSILON) {
+					// Chain-wing heading hold: maintain heading setpoint, yaw stick updates it
+					if (!_heading_setpoint_initialized) {
+						_heading_setpoint = yaw_body;
+						_heading_setpoint_initialized = true;
+					}
+
+					_att_sp.yaw_body = _heading_setpoint;
+
+				} else {
+					_att_sp.yaw_body = yaw_body; // yaw is not controlled, so set setpoint to current yaw
+				}
 				_att_sp.thrust_body[0] = (_manual_control_setpoint.throttle + 1.f) * .5f;
 
 				Quatf q(Eulerf(_att_sp.roll_body, _att_sp.pitch_body, _att_sp.yaw_body));
@@ -296,6 +309,7 @@ void FixedwingAttitudeControl::Run()
 
 				_rates_sp.reset_integral = true;
 				_wheel_ctrl.reset_integrator();
+				_heading_setpoint_initialized = false;
 
 			} else {
 				_rates_sp.reset_integral = false;
@@ -373,8 +387,19 @@ void FixedwingAttitudeControl::Run()
 
 					/* add yaw rate setpoint from sticks in all attitude-controlled modes */
 					if (_vcontrol_mode.flag_control_manual_enabled) {
-						body_rates_setpoint(2) += math::constrain(_manual_control_setpoint.yaw * radians(_param_fw_y_rmax.get()),
-									  -radians(_param_fw_y_rmax.get()), radians(_param_fw_y_rmax.get()));
+						if (_param_fw_yaw_stab_sc.get() > FLT_EPSILON) {
+							// Chain-wing mode: yaw stick updates heading setpoint
+							const float yaw_stick = _manual_control_setpoint.yaw;
+
+							if (fabsf(yaw_stick) > 0.05f) {
+								_heading_setpoint += yaw_stick * radians(_param_fw_y_rmax.get()) * dt;
+								_heading_setpoint = wrap_pi(_heading_setpoint);
+							}
+
+						} else {
+							body_rates_setpoint(2) += math::constrain(_manual_control_setpoint.yaw * radians(_param_fw_y_rmax.get()),
+										  -radians(_param_fw_y_rmax.get()), radians(_param_fw_y_rmax.get()));
+						}
 					}
 
 					// Tailsitter: transform from FW to hover frame (all interfaces are in hover (body) frame)
