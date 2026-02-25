@@ -1,0 +1,145 @@
+#!/bin/sh
+#
+# @name Gazebo Chain-Wing UAV (3-unit)
+# @type Fixedwing
+#
+# Three fixed-wing units linked at wingtips. Three motors for
+# differential thrust yaw control. Reversed elevon allocation
+# for roll stability per report Table 3.3.
+#
+
+. ${R}etc/init.d/rc.fw_defaults
+
+PX4_SIMULATOR=${PX4_SIMULATOR:=gz}
+PX4_GZ_WORLD=${PX4_GZ_WORLD:=default}
+PX4_SIM_MODEL=${PX4_SIM_MODEL:=chainwing}
+
+param set-default SIM_GZ_EN 1
+
+param set-default SENS_EN_GPSSIM 1
+param set-default SENS_EN_BAROSIM 0
+param set-default SENS_EN_MAGSIM 1
+param set-default SENS_EN_ARSPDSIM 1
+
+# --- Airframe type ---
+param set-default CA_AIRFRAME 1
+
+# --- Three motors for differential thrust yaw control ---
+param set-default CA_ROTOR_COUNT 3
+
+# Motor 0: left unit (Y = -0.6m)
+param set-default CA_ROTOR0_PX 0.0
+param set-default CA_ROTOR0_PY -0.6
+param set-default CA_ROTOR0_PZ 0.0
+
+# Motor 1: center unit (Y = 0.0m)
+param set-default CA_ROTOR1_PX 0.0
+param set-default CA_ROTOR1_PY 0.0
+param set-default CA_ROTOR1_PZ 0.0
+
+# Motor 2: right unit (Y = 0.6m)
+param set-default CA_ROTOR2_PX 0.0
+param set-default CA_ROTOR2_PY 0.6
+param set-default CA_ROTOR2_PZ 0.0
+
+# --- Three control surfaces ---
+param set-default CA_SV_CS_COUNT 3
+
+# CS0: Left unit - Right Elevon (reversed for chain-wing roll stability)
+param set-default CA_SV_CS0_TYPE 6
+param set-default CA_SV_CS0_TRQ_R 0.5
+param set-default CA_SV_CS0_TRQ_P 0.5
+param set-default CA_SV_CS0_TRQ_Y 0.0
+
+# CS1: Center unit - Elevator
+param set-default CA_SV_CS1_TYPE 3
+param set-default CA_SV_CS1_TRQ_R 0.0
+param set-default CA_SV_CS1_TRQ_P 1.0
+param set-default CA_SV_CS1_TRQ_Y 0.0
+
+# CS2: Right unit - Left Elevon (reversed for chain-wing roll stability)
+param set-default CA_SV_CS2_TYPE 5
+param set-default CA_SV_CS2_TRQ_R -0.5
+param set-default CA_SV_CS2_TRQ_P 0.5
+param set-default CA_SV_CS2_TRQ_Y 0.0
+
+# --- Airspeed parameters (from report) ---
+param set-default FW_AIRSPD_MIN 8
+param set-default FW_AIRSPD_TRIM 12
+param set-default FW_AIRSPD_MAX 20
+param set-default FW_AIRSPD_STALL 6
+
+# --- Attitude control tuning ---
+param set-default FW_R_TC 0.4
+param set-default FW_P_TC 0.4
+param set-default FW_R_RMAX 50.0
+param set-default FW_P_RMAX_POS 40.0
+param set-default FW_P_RMAX_NEG 40.0
+param set-default FW_Y_RMAX 30.0
+
+# --- Rate controller gains (tuned for GZ simulation) ---
+param set-default FW_PR_P 0.9
+param set-default FW_PR_FF 0.5
+param set-default FW_PR_I 0.5
+
+param set-default FW_RR_FF 0.5
+param set-default FW_RR_P 0.3
+param set-default FW_RR_I 0.5
+
+param set-default FW_YR_FF 0.5
+param set-default FW_YR_P 0.6
+param set-default FW_YR_I 0.5
+
+# --- Yaw heading hold for chain-wing stabilization ---
+param set-default FW_YAW_STAB_SC 2.0
+
+# --- Pitch offset (4.5 deg trim angle of attack) ---
+param set-default FW_PSP_OFF 4.5
+
+# --- Throttle ---
+param set-default FW_THR_MAX 0.6
+param set-default FW_THR_MIN 0.05
+param set-default FW_THR_TRIM 0.25
+
+# --- Performance ---
+param set-default FW_T_CLMB_MAX 8
+param set-default FW_T_SINK_MAX 2.7
+param set-default FW_T_SINK_MIN 2.2
+param set-default FW_P_LIM_MIN -15
+param set-default FW_LND_ANG 8
+
+# --- Mission ---
+param set-default MIS_TAKEOFF_ALT 30
+param set-default NAV_ACC_RAD 15
+param set-default NAV_DLL_ACT 2
+param set-default NPFG_PERIOD 12
+
+# --- Takeoff ---
+param set-default RWTO_TKOFF 1
+
+# --- Prearm ---
+param set-default COM_PREARM_MODE 2
+
+# --- GZ ESC function mapping (3 motors) ---
+# ESC1 → Motor 0 (left):   function 101 = Motor 1
+# ESC2 → Motor 1 (center): function 102 = Motor 2
+# ESC3 → Motor 2 (right):  function 103 = Motor 3
+param set-default SIM_GZ_EC_FUNC1 101
+param set-default SIM_GZ_EC_MIN1 0
+param set-default SIM_GZ_EC_MAX1 1000
+
+param set-default SIM_GZ_EC_FUNC2 102
+param set-default SIM_GZ_EC_MIN2 0
+param set-default SIM_GZ_EC_MAX2 1000
+
+param set-default SIM_GZ_EC_FUNC3 103
+param set-default SIM_GZ_EC_MIN3 0
+param set-default SIM_GZ_EC_MAX3 1000
+
+# --- GZ Servo function mapping (3 control surfaces) ---
+# SV1 → Servo 0 (left elevon):  function 201 = Servo 1
+# SV2 → Servo 1 (elevator):     function 202 = Servo 2
+# SV3 → Servo 2 (right elevon): function 203 = Servo 3
+param set-default SIM_GZ_SV_FUNC1 201
+param set-default SIM_GZ_SV_FUNC2 202
+param set-default SIM_GZ_SV_FUNC3 203
