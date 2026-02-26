@@ -384,3 +384,281 @@ CA_SV_CS2_TRQ_R -0.5
 - `FW_YAW_STAB_SC = 0`（默认）: 所有新增代码走 `else` 分支，行为与未修改的PX4完全一致
 - `FW_YAW_STAB_SC > 0`（链翼模式）: 启用航向保持 + 差动推力偏航控制
 - 机架文件为可选配置，不影响其他机型
+
+---
+
+## 七、GZ 仿真 + QGC 调参完整指南
+
+**可以！** PX4 SITL 仿真天然支持 QGC 连接。下面是从零开始的完整步骤。
+
+### 7.1 环境准备
+
+#### 方式A: WSL2 (Windows 用户推荐)
+
+```bash
+# 1. 确保使用 WSL2 + Ubuntu 22.04
+wsl --install -d Ubuntu-22.04
+
+# 2. 在 WSL2 中安装 PX4 工具链
+cd ~/PX4_test   # 或你的 PX4 源码目录
+bash Tools/setup/ubuntu.sh
+
+# 3. 安装 Gazebo Garden
+sudo apt-get update
+sudo apt-get install gz-garden
+
+# 4. 如果 WSL2 中没有 GUI (用于 Gazebo 画面)
+# 需要安装 WSLg 或 X Server (Windows 11 自带 WSLg)
+# Windows 10 需要安装 VcXsrv 或 X410:
+#   export DISPLAY=$(cat /etc/resolv.conf | grep nameserver | awk '{print $2}'):0
+```
+
+#### 方式B: 原生 Ubuntu 22.04
+
+```bash
+# 1. 安装 PX4 工具链
+cd ~/PX4_test
+bash Tools/setup/ubuntu.sh
+
+# 2. 安装 Gazebo Garden
+sudo apt-get install gz-garden
+```
+
+#### QGC 安装
+
+```bash
+# 方式1: 在 Windows 上安装 QGC (WSL 用户推荐)
+# 从 https://docs.qgroundcontrol.com/master/en/qgc-user-guide/getting_started/download_and_install.html
+# 下载 Windows 版 QGC 安装包
+
+# 方式2: 在 Linux 上安装 QGC
+sudo usermod -a -G dialout $USER
+sudo apt-get install fuse libfuse2
+# 下载 QGC.AppImage 并运行
+```
+
+### 7.2 启动仿真
+
+```bash
+# 在 PX4 源码目录下执行:
+cd ~/PX4_test
+make px4_sitl gz_chainwing
+```
+
+这条命令会：
+1. ✅ 编译 PX4 SITL 固件（含链翼增稳代码）
+2. ✅ 启动 Gazebo，加载 `default` 世界 + `chainwing` 模型
+3. ✅ 启动 PX4 飞控，自动加载 `4007_gz_chainwing` 机架配置
+4. ✅ **自动启动 MAVLink UDP 广播到端口 14550**（QGC 默认监听端口）
+
+启动成功后你会看到 PX4 shell 提示符 `pxh>`
+
+### 7.3 连接 QGC
+
+#### WSL 用户 (QGC 在 Windows 上)
+
+**QGC 会自动连接！** PX4 SITL 会广播 MAVLink 到 UDP 14550，QGC 默认监听此端口。
+
+1. 先在 WSL 中启动仿真: `make px4_sitl gz_chainwing`
+2. 在 Windows 上打开 QGroundControl
+3. QGC 应该在几秒内自动检测到飞行器并连接
+
+**如果自动连接失败**（WSL 网络隔离问题）：
+
+```bash
+# 在 WSL 中查看 WSL IP 地址:
+ip addr show eth0 | grep "inet "
+# 输出类似: inet 172.xx.xx.xx/20
+
+# 然后在 QGC 中手动添加连接:
+# QGC → 应用设置(齿轮图标) → 通讯连接 → 添加
+#   类型: UDP
+#   监听端口: 14550
+#   添加目标主机: 172.xx.xx.xx:18570
+#   (其中 172.xx.xx.xx 是 WSL 的 IP)
+```
+
+#### 原生 Linux 用户
+
+1. 先在终端中启动仿真: `make px4_sitl gz_chainwing`
+2. 在同一台机器上打开 QGC
+3. QGC 自动连接（localhost UDP 14550）
+
+### 7.4 QGC 中的参数调整
+
+连接成功后，在 QGC 中:
+
+**参数页面入口**: 点击顶部齿轮图标 → **参数 (Parameters)**
+
+#### 7.4.1 链翼核心参数 (搜索关键词: `FW_`)
+
+| 参数名 | 含义 | 默认值 | 链翼推荐值 | 调整建议 |
+|--------|------|-------|-----------|---------|
+| **FW_YAW_STAB_SC** | 偏航航向保持增益 | 0.0 | **2.0** | 增大→更强航向保持，过大会振荡 |
+| **FW_R_TC** | 横滚时间常数 | 0.4 | 0.4 | 减小→响应更快，过小会振荡 |
+| **FW_P_TC** | 俯仰时间常数 | 0.4 | 0.4 | 减小→响应更快，过小会振荡 |
+| **FW_Y_RMAX** | 最大偏航速率 | 50 | **30** | 限制偏航速率避免结构过载 |
+| **FW_PSP_OFF** | 俯仰配平偏移 | 0.0 | **4.5** | 报告中的最佳配平迎角 |
+
+#### 7.4.2 角速率控制器增益 (搜索关键词: `FW_RR` / `FW_PR` / `FW_YR`)
+
+| 参数名 | 含义 | 链翼推荐值 | 调整方法 |
+|--------|------|-----------|---------|
+| **FW_RR_P** | 横滚速率P增益 | 0.3 | 横滚振荡→减小; 响应慢→增大 |
+| **FW_RR_I** | 横滚速率I增益 | 0.5 | 稳态偏差→增大; 超调→减小 |
+| **FW_RR_FF** | 横滚速率前馈 | 0.5 | 提高响应速度 |
+| **FW_PR_P** | 俯仰速率P增益 | 0.9 | 俯仰振荡→减小; 响应慢→增大 |
+| **FW_PR_I** | 俯仰速率I增益 | 0.5 | 稳态偏差→增大 |
+| **FW_PR_FF** | 俯仰速率前馈 | 0.5 | 提高响应速度 |
+| **FW_YR_P** | 偏航速率P增益 | 0.6 | 偏航振荡→减小; 航向偏→增大 |
+| **FW_YR_I** | 偏航速率I增益 | 0.5 | 稳态航向偏差→增大 |
+| **FW_YR_FF** | 偏航速率前馈 | 0.5 | 提高航向响应 |
+
+#### 7.4.3 油门与空速 (搜索关键词: `FW_THR` / `FW_AIRSPD`)
+
+| 参数名 | 含义 | 链翼推荐值 | 说明 |
+|--------|------|-----------|-----|
+| **FW_THR_TRIM** | 巡航油门 | 0.25 | 平飞所需油门 |
+| **FW_THR_MAX** | 最大油门 | 0.6 | 限制最大推力 |
+| **FW_THR_MIN** | 最小油门 | 0.05 | 怠速 |
+| **FW_AIRSPD_TRIM** | 巡航空速 | 12 m/s | 报告数据 |
+| **FW_AIRSPD_MIN** | 最小空速 | 8 m/s | 低于此减速报警 |
+| **FW_AIRSPD_STALL** | 失速空速 | 6 m/s | 低于此失速 |
+
+#### 7.4.4 控制分配参数 (搜索关键词: `CA_`)
+
+| 参数名 | 含义 | 值 | **不建议随意修改** |
+|--------|------|---|---|
+| CA_ROTOR_COUNT | 电机数量 | 3 | 固定 |
+| CA_ROTOR0_PY | 左电机Y位置 | -0.6 | 决定差动推力力臂 |
+| CA_ROTOR2_PY | 右电机Y位置 | 0.6 | 决定差动推力力臂 |
+| CA_SV_CS0_TRQ_R | 左升降副翼横滚效能 | 0.5 | 反向配置关键 |
+| CA_SV_CS2_TRQ_R | 右升降副翼横滚效能 | -0.5 | 反向配置关键 |
+
+### 7.5 仿真飞行测试步骤
+
+#### 第一步: 基本检查
+
+```bash
+# 在 PX4 shell (pxh>) 中:
+commander status          # 查看飞控状态
+param show FW_YAW_STAB_SC  # 确认航向保持增益
+param show FW_PSP_OFF       # 确认俯仰偏移
+listener vehicle_attitude   # 查看实时姿态数据
+```
+
+#### 第二步: 手动起飞 (STABILIZED 模式)
+
+```bash
+# 方式1: PX4 shell 命令
+commander mode stabilized   # 切换到增稳模式
+commander arm               # 解锁
+commander takeoff            # 起飞
+
+# 方式2: 在 QGC 中
+# 点击左上角飞行模式 → 选择 "Stabilized"
+# 滑动底部解锁滑块
+# 点击 "起飞" 按钮
+```
+
+#### 第三步: 观察飞行状态
+
+在 QGC 中观察:
+- **姿态指示器**: 横滚/俯仰是否稳定
+- **航向指示器**: 航向是否保持（偏航增稳效果）
+- **空速显示**: 是否在 8-20 m/s 范围内
+- **地图视图**: 航迹是否直线
+
+#### 第四步: 实时调参测试
+
+1. 在 QGC **参数页面** 修改 `FW_YAW_STAB_SC`:
+   - 设为 0 → 关闭航向保持 → 观察航向是否漂移
+   - 设为 1.0 → 轻度航向保持
+   - 设为 2.0 → 标准链翼航向保持
+   - 设为 3.0 → 强航向保持 → 观察是否偏航振荡
+
+2. 测试横滚稳定性:
+   - 观察升降副翼反向配置效果
+   - 在 QGC 飞行数据 → 分析视图中查看 `vehicle_attitude.roll` 曲线
+
+3. 测试差动推力:
+   - 在 QGC 分析视图中查看 `actuator_outputs.output[0]` 到 `output[2]`
+   - 偏航修正时应看到左右电机输出差异
+
+#### 第五步: 自主飞行测试
+
+```bash
+# 在 QGC 中:
+# 1. 切换到 "计划" 视图
+# 2. 在地图上点击添加航点
+# 3. 上传任务
+# 4. 切换到 Mission 模式
+commander mode auto:mission
+```
+
+### 7.6 调参工作流建议
+
+```
+第一轮: 基本飞行
+├── 确认能起飞、平飞、不坠毁
+├── 如果俯仰振荡 → 减小 FW_PR_P
+├── 如果横滚振荡 → 减小 FW_RR_P
+└── 如果偏航振荡 → 减小 FW_YR_P 或 FW_YAW_STAB_SC
+
+第二轮: 航向保持
+├── 增稳模式下松开摇杆，观察航向是否保持
+├── 航向漂移 → 增大 FW_YAW_STAB_SC (从 1.0 开始逐步增大)
+├── 偏航振荡 → 减小 FW_YAW_STAB_SC 或 FW_YR_P
+└── 航向保持良好但转弯迟钝 → 增大 FW_Y_RMAX
+
+第三轮: 精细调整
+├── 空速保持 → 调整 FW_THR_TRIM
+├── 高度保持 → 调整 FW_T_CLMB_MAX / FW_T_SINK_MAX
+└── 自主航线跟踪 → 调整 NPFG_PERIOD / NAV_ACC_RAD
+```
+
+### 7.7 常见问题排查
+
+| 问题 | 原因 | 解决方案 |
+|------|------|---------|
+| QGC 无法连接 | 网络/端口问题 | 检查防火墙；WSL 用户手动添加 UDP 连接 |
+| Gazebo 中无飞机模型 | 惯性矩错误(已修复) | 确保使用最新代码（含惯性矩修正） |
+| 起飞后立即坠毁 | 油门/俯仰参数 | 检查 FW_THR_TRIM、FW_PSP_OFF |
+| 飞机持续偏航 | 航向保持未启用 | 确认 FW_YAW_STAB_SC > 0 |
+| 横滚振荡 | 增益过大 | 减小 FW_RR_P 和 FW_RR_I |
+| 偏航振荡 | 航向增益过大 | 减小 FW_YAW_STAB_SC |
+| 参数修改后没效果 | 需要重启 | 部分参数需要 `reboot` 后生效 |
+| Gazebo 界面卡顿 | GPU/WSL 性能 | 尝试 `export LIBGL_ALWAYS_SOFTWARE=1` |
+
+### 7.8 QGC 中的实时监控视图
+
+在 QGC **分析 (Analyze)** 页面可以实时监控以下数据:
+
+```
+vehicle_attitude.roll     — 实时横滚角（观察横滚稳定性）
+vehicle_attitude.pitch    — 实时俯仰角（观察俯仰稳定性）
+vehicle_attitude.yaw      — 实时偏航角（观察航向保持效果）
+vehicle_rates.roll        — 横滚角速率
+vehicle_rates.pitch       — 俯仰角速率
+vehicle_rates.yaw         — 偏航角速率（观察差动推力效果）
+airspeed.true_airspeed_m_s — 空速
+actuator_outputs.output[0] — 左电机输出
+actuator_outputs.output[1] — 中电机输出
+actuator_outputs.output[2] — 右电机输出（对比左右电机看差动推力）
+```
+
+### 7.9 多机仿真 (可选)
+
+如果需要在同一仿真中测试多架链翼无人机:
+
+```bash
+# 第一架 (实例 0, MAVLink 端口 14550)
+PX4_SYS_AUTOSTART=4007 PX4_GZ_MODEL=chainwing ./build/px4_sitl_default/bin/px4 -i 0
+
+# 第二架 (实例 1, MAVLink 端口 14551)
+PX4_SYS_AUTOSTART=4007 PX4_GZ_MODEL=chainwing ./build/px4_sitl_default/bin/px4 -i 1
+
+# 在 QGC 中:
+# 应用设置 → 通讯连接 → 添加 → UDP → 端口 14551
+# 这样可以同时监控两架飞机
+```
