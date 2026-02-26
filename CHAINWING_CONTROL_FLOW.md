@@ -817,3 +817,157 @@ param set-default EKF2_ACC_B_NOISE 0.005
 param set-default FW_T_CLMB_MAX 5    # 降低最大爬升率
 param set-default FW_P_LIM_MAX 15     # 限制最大仰角
 ```
+
+---
+
+## 九、PX4 参数命令正确用法与常见错误
+
+### 9.1 问题诊断
+
+以下错误均为**命令用法错误**，不是固件 ROMFS 缺失或启动脚本问题：
+
+```bash
+# ❌ 错误1: ATT_W_MAX 和 ATT_R_MAX 在 PX4 中不存在
+pxh> param set ATT_W_MAX 0.5
+ERROR [param] Parameter ATT_W_MAX not found.
+
+# ❌ 错误2: param find 查找的是精确名称，不支持前缀搜索
+pxh> param find ATT_
+ERROR [param] Parameter ATT_ not found   # 没有叫 "ATT_" 的参数
+
+pxh> param find EKF2
+ERROR [param] Parameter EKF2 not found   # 没有叫 "EKF2" 的参数
+```
+
+### 9.2 正确的参数搜索命令
+
+```bash
+# ✅ 正确: 用 param show 搜索（支持通配符）
+pxh> param show EKF2_*       # 列出所有 EKF2 开头的参数
+pxh> param show SENS_*       # 列出所有 SENS 开头的参数
+pxh> param show ATT_*        # 列出所有 ATT 开头的参数
+pxh> param show FW_*         # 列出所有 FW 开头的参数
+pxh> param show FW_YAW*      # 列出偏航相关参数
+
+# ✅ 正确: 用 param find 查找精确参数名
+pxh> param find EKF2_ACC_NOISE    # 查找 EKF2_ACC_NOISE 的索引
+pxh> param find FW_YAW_STAB_SC    # 查找偏航增稳增益的索引
+
+# ✅ 查看所有已修改的参数
+pxh> param show -c
+
+# ✅ 查看所有参数
+pxh> param show -a
+```
+
+### 9.3 常见错误参数名 → 正确参数名
+
+用户可能混淆的参数名：
+
+| 错误名称 | 正确名称 | 说明 |
+|---------|---------|------|
+| `ATT_W_MAX` | **不存在** | PX4 中没有此参数 |
+| `ATT_R_MAX` | **不存在** | PX4 中没有此参数 |
+| `ATT_W_ACC` | `ATT_W_ACC` ✓ | 加速度计权重 (attitude_estimator_q 模块) |
+| `ATT_W_MAG` | `ATT_W_MAG` ✓ | 磁力计权重 |
+| `ATT_BIAS_MAX` | `ATT_BIAS_MAX` ✓ | 最大陀螺仪偏差 |
+
+> **注意**: `ATT_*` 参数属于 `attitude_estimator_q` 模块（备用估计器），而链翼无人机使用 `EKF2` 作为主估计器。应优先调整 `EKF2_*` 参数。
+
+### 9.4 链翼无人机完整参数快速参考
+
+以下是仿真中所有可用的链翼相关参数（均可通过 `param set` 修改）：
+
+#### 链翼核心控制参数
+```bash
+param set FW_YAW_STAB_SC 2.0     # 偏航航向保持增益 [0=关闭, 2.0=推荐]
+param set FW_PSP_OFF 4.5          # 俯仰配平偏移 [度]
+param set FW_Y_RMAX 30            # 最大偏航速率 [度/秒]
+```
+
+#### 姿态时间常数
+```bash
+param set FW_R_TC 0.4             # 横滚时间常数 [秒]
+param set FW_P_TC 0.4             # 俯仰时间常数 [秒]
+```
+
+#### 角速率PID增益
+```bash
+# 横滚速率
+param set FW_RR_P 0.3             # P增益
+param set FW_RR_I 0.5             # I增益
+param set FW_RR_FF 0.5            # 前馈
+
+# 俯仰速率
+param set FW_PR_P 0.9             # P增益
+param set FW_PR_I 0.5             # I增益
+param set FW_PR_FF 0.5            # 前馈
+
+# 偏航速率
+param set FW_YR_P 0.6             # P增益
+param set FW_YR_I 0.5             # I增益
+param set FW_YR_FF 0.5            # 前馈
+```
+
+#### 空速与油门
+```bash
+param set FW_AIRSPD_TRIM 12       # 巡航空速 [m/s]
+param set FW_AIRSPD_MIN 8         # 最小空速 [m/s]
+param set FW_AIRSPD_MAX 20        # 最大空速 [m/s]
+param set FW_AIRSPD_STALL 6       # 失速空速 [m/s]
+param set FW_THR_TRIM 0.25        # 巡航油门 [0-1]
+param set FW_THR_MAX 0.6          # 最大油门 [0-1]
+param set FW_THR_MIN 0.05         # 最小油门 [0-1]
+```
+
+#### EKF2 估计器参数
+```bash
+param set EKF2_ACC_NOISE 0.5      # 加速度计噪声 [m/s²] (默认0.35)
+param set EKF2_GYR_NOISE 0.02     # 陀螺仪噪声 [rad/s] (默认0.015)
+param set EKF2_ACC_B_NOISE 0.005  # 加速度偏差噪声 [m/s³] (默认0.003)
+param set EKF2_GYR_B_NOISE 0.001  # 陀螺仪偏差噪声 [rad/s²]
+param set EKF2_BARO_NOISE 3.5     # 气压计噪声 [m]
+param set EKF2_GPS_V_NOISE 0.3    # GPS速度噪声 [m/s]
+param set EKF2_GPS_P_NOISE 0.5    # GPS位置噪声 [m]
+```
+
+#### 爬升与俯仰限制
+```bash
+param set FW_T_CLMB_MAX 5         # 最大爬升率 [m/s]
+param set FW_P_LIM_MAX 15         # 最大仰角 [度]
+param set FW_P_LIM_MIN -15        # 最大俯角 [度]
+param set FW_P_RMAX_POS 40        # 最大俯仰正速率 [度/秒]
+param set FW_P_RMAX_NEG 40        # 最大俯仰负速率 [度/秒]
+param set FW_R_RMAX 50            # 最大横滚速率 [度/秒]
+```
+
+#### 控制分配参数（不建议随意修改）
+```bash
+param show CA_ROTOR*              # 查看电机位置
+param show CA_SV_CS*              # 查看舵面配置
+```
+
+### 9.5 `param` 命令完整用法
+
+```bash
+# 设置参数
+param set <参数名> <值>            # 设置参数值
+param set-default <参数名> <值>    # 设置默认值（仅在启动脚本中使用）
+
+# 查看参数
+param show <前缀>*                 # 按前缀搜索（支持通配符）
+param show -c                      # 只显示已修改的参数
+param show -a                      # 显示所有参数
+param show -q <精确名称>           # 安静模式，只输出值
+
+# 查找参数
+param find <精确名称>              # 查找参数索引（需要精确名称）
+
+# 保存/加载
+param save                         # 保存当前参数到文件
+param load <文件名>                # 从文件加载参数
+
+# 重置
+param reset_all                    # 重置所有参数到默认值
+param reset <参数名>               # 重置单个参数到默认值
+```
