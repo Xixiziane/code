@@ -111,7 +111,10 @@ param set-default FW_LND_ANG 8
 # --- Mission ---
 param set-default MIS_TAKEOFF_ALT 30
 param set-default NAV_ACC_RAD 15
-param set-default NAV_DLL_ACT 2
+# --- Data link loss: disabled for SITL standalone testing ---
+# NAV_DLL_ACT=0 allows arming without QGC connection.
+# Set to 2 (RTL) when connected to a GCS for safety.
+param set-default NAV_DLL_ACT 0
 param set-default NPFG_PERIOD 12
 
 # --- Takeoff ---
