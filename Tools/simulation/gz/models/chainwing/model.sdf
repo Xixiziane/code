@@ -467,14 +467,15 @@
     <link name='rotor_left'>
       <pose>0.22 -0.60 0.0 0 1.5708 0</pose>
       <inertial>
+        <pose>0 0 0 0 0 0</pose>
         <mass>0.005</mass>
         <inertia>
           <ixx>9.75e-07</ixx>
           <ixy>0</ixy>
           <ixz>0</ixz>
-          <iyy>0.000167</iyy>
+          <iyy>0.000166704</iyy>
           <iyz>0</iyz>
-          <izz>0.000168</izz>
+          <izz>0.000167604</izz>
         </inertia>
       </inertial>
       <visual name='rotor_left_visual'>
@@ -507,14 +508,15 @@
     <link name='rotor_center'>
       <pose>0.22 0.0 0.0 0 1.5708 0</pose>
       <inertial>
+        <pose>0 0 0 0 0 0</pose>
         <mass>0.005</mass>
         <inertia>
           <ixx>9.75e-07</ixx>
           <ixy>0</ixy>
           <ixz>0</ixz>
-          <iyy>0.000167</iyy>
+          <iyy>0.000166704</iyy>
           <iyz>0</iyz>
-          <izz>0.000168</izz>
+          <izz>0.000167604</izz>
         </inertia>
       </inertial>
       <visual name='rotor_center_visual'>
@@ -547,14 +549,15 @@
     <link name='rotor_right'>
       <pose>0.22 0.60 0.0 0 1.5708 0</pose>
       <inertial>
+        <pose>0 0 0 0 0 0</pose>
         <mass>0.005</mass>
         <inertia>
           <ixx>9.75e-07</ixx>
           <ixy>0</ixy>
           <ixz>0</ixz>
-          <iyy>0.000167</iyy>
+          <iyy>0.000166704</iyy>
           <iyz>0</iyz>
-          <izz>0.000168</izz>
+          <izz>0.000167604</izz>
         </inertia>
       </inertial>
       <visual name='rotor_right_visual'>
