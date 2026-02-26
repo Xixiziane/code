@@ -102,7 +102,7 @@ param set-default FW_THR_MIN 0.05
 param set-default FW_THR_TRIM 0.25
 
 # --- Performance ---
-param set-default FW_T_CLMB_MAX 8
+param set-default FW_T_CLMB_MAX 5
 param set-default FW_T_SINK_MAX 2.7
 param set-default FW_T_SINK_MIN 2.2
 param set-default FW_P_LIM_MIN -15
@@ -143,3 +143,11 @@ param set-default SIM_GZ_EC_MAX3 1000
 param set-default SIM_GZ_SV_FUNC1 201
 param set-default SIM_GZ_SV_FUNC2 202
 param set-default SIM_GZ_SV_FUNC3 203
+
+# --- EKF2 tuning for chain-wing dynamics ---
+param set-default EKF2_ACC_NOISE 0.5
+param set-default EKF2_GYR_NOISE 0.02
+param set-default EKF2_ACC_B_NOISE 0.005
+
+# --- Climb limits (avoid stall at high AoA) ---
+param set-default FW_P_LIM_MAX 15

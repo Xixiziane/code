@@ -31,14 +31,14 @@
         <mass>1.5</mass>
         <inertia>
           <!-- Ixx: large due to wide wingspan (1.8m span) -->
-          <ixx>0.30</ixx>
+          <ixx>0.40</ixx>
           <ixy>0</ixy>
           <ixz>0</ixz>
-          <!-- Iyy: moderate (0.67m chord-wise) -->
-          <iyy>0.10</iyy>
+          <!-- Iyy: pitch inertia (fuselage length dominated) -->
+          <iyy>0.06</iyy>
           <iyz>0</iyz>
           <!-- Izz: very large yaw inertia (key chain-wing characteristic) -->
-          <izz>0.38</izz>
+          <izz>0.45</izz>
         </inertia>
       </inertial>
 
@@ -745,7 +745,7 @@
 
     <!-- Left wing section with left elevon control -->
     <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
-      <a0>0.08</a0>
+      <a0>-0.07</a0>
       <cla>4.75</cla>
       <cda>0.64</cda>
       <cma>0.0</cma>
@@ -765,7 +765,7 @@
 
     <!-- Center wing section (no aileron control, elevator only for pitch) -->
     <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
-      <a0>0.08</a0>
+      <a0>-0.07</a0>
       <cla>4.75</cla>
       <cda>0.64</cda>
       <cma>0.0</cma>
@@ -783,7 +783,7 @@
 
     <!-- Right wing section with right elevon control -->
     <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
-      <a0>0.08</a0>
+      <a0>-0.07</a0>
       <cla>4.75</cla>
       <cda>0.64</cda>
       <cma>0.0</cma>
@@ -812,7 +812,7 @@
       <cda_stall>-0.92</cda_stall>
       <cma_stall>0</cma_stall>
       <cp>-0.50 0 0</cp>
-      <area>0.020</area>
+      <area>0.050</area>
       <air_density>1.2041</air_density>
       <forward>1 0 0</forward>
       <upward>0 0 1</upward>
