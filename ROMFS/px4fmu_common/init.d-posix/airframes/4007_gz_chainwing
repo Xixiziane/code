@@ -27,9 +27,9 @@ param set-default CA_AIRFRAME 1
 # --- Three motors for differential thrust yaw control ---
 param set-default CA_ROTOR_COUNT 3
 
-# Motor 0: left unit (Y = -0.6m)
+# Motor 0: left unit (Y = -1.2m, matching MATLAB b=1.2m unit spacing)
 param set-default CA_ROTOR0_PX 0.0
-param set-default CA_ROTOR0_PY -0.6
+param set-default CA_ROTOR0_PY -1.2
 param set-default CA_ROTOR0_PZ 0.0
 
 # Motor 1: center unit (Y = 0.0m)
@@ -37,9 +37,9 @@ param set-default CA_ROTOR1_PX 0.0
 param set-default CA_ROTOR1_PY 0.0
 param set-default CA_ROTOR1_PZ 0.0
 
-# Motor 2: right unit (Y = 0.6m)
+# Motor 2: right unit (Y = 1.2m, matching MATLAB b=1.2m unit spacing)
 param set-default CA_ROTOR2_PX 0.0
-param set-default CA_ROTOR2_PY 0.6
+param set-default CA_ROTOR2_PY 1.2
 param set-default CA_ROTOR2_PZ 0.0
 
 # --- Three control surfaces ---
@@ -63,19 +63,19 @@ param set-default CA_SV_CS2_TRQ_R -0.5
 param set-default CA_SV_CS2_TRQ_P 0.5
 param set-default CA_SV_CS2_TRQ_Y 0.0
 
-# --- Airspeed parameters (from report) ---
-param set-default FW_AIRSPD_MIN 8
-param set-default FW_AIRSPD_TRIM 12
-param set-default FW_AIRSPD_MAX 20
-param set-default FW_AIRSPD_STALL 6
+# --- Airspeed parameters (from MATLAB: V0=20m/s cruise) ---
+param set-default FW_AIRSPD_MIN 15
+param set-default FW_AIRSPD_TRIM 20
+param set-default FW_AIRSPD_MAX 30
+param set-default FW_AIRSPD_STALL 8
 
-# --- Attitude control tuning ---
-param set-default FW_R_TC 0.4
-param set-default FW_P_TC 0.4
-param set-default FW_R_RMAX 50.0
-param set-default FW_P_RMAX_POS 40.0
-param set-default FW_P_RMAX_NEG 40.0
-param set-default FW_Y_RMAX 30.0
+# --- Attitude control tuning (adjusted for larger inertia) ---
+param set-default FW_R_TC 0.5
+param set-default FW_P_TC 0.5
+param set-default FW_R_RMAX 30.0
+param set-default FW_P_RMAX_POS 25.0
+param set-default FW_P_RMAX_NEG 25.0
+param set-default FW_Y_RMAX 15.0
 
 # --- Rate controller gains (tuned for GZ simulation) ---
 param set-default FW_PR_P 0.9
@@ -93,24 +93,24 @@ param set-default FW_YR_I 0.5
 # --- Yaw heading hold for chain-wing stabilization ---
 param set-default FW_YAW_STAB_SC 2.0
 
-# --- Pitch offset (4.5 deg trim angle of attack) ---
-param set-default FW_PSP_OFF 4.5
+# --- Pitch offset (MATLAB: alpha_trim ≈ 4.7°, but GZ trim is lower) ---
+param set-default FW_PSP_OFF 2.0
 
-# --- Throttle ---
-param set-default FW_THR_MAX 0.6
+# --- Throttle (MATLAB: trim throttle 0.6, T_max=15N/motor) ---
+param set-default FW_THR_MAX 1.0
 param set-default FW_THR_MIN 0.05
-param set-default FW_THR_TRIM 0.25
+param set-default FW_THR_TRIM 0.60
 
 # --- Performance ---
-param set-default FW_T_CLMB_MAX 5
-param set-default FW_T_SINK_MAX 2.7
-param set-default FW_T_SINK_MIN 2.2
+param set-default FW_T_CLMB_MAX 8
+param set-default FW_T_SINK_MAX 3.0
+param set-default FW_T_SINK_MIN 2.5
 param set-default FW_P_LIM_MIN -15
 param set-default FW_LND_ANG 8
 
 # --- Mission ---
-param set-default MIS_TAKEOFF_ALT 30
-param set-default NAV_ACC_RAD 15
+param set-default MIS_TAKEOFF_ALT 100
+param set-default NAV_ACC_RAD 20
 # --- Data link loss: disabled for SITL standalone testing ---
 # NAV_DLL_ACT=0 allows arming without QGC connection.
 # Set to 2 (RTL) when connected to a GCS for safety.

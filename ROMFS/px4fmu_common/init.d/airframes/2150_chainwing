@@ -22,9 +22,9 @@ param set-default CA_AIRFRAME 1
 # --- Three motors for differential thrust yaw control ---
 param set-default CA_ROTOR_COUNT 3
 
-# Motor 0: left unit (Y = -0.6m from center)
+# Motor 0: left unit (Y = -1.2m from center, MATLAB b=1.2m)
 param set-default CA_ROTOR0_PX 0.0
-param set-default CA_ROTOR0_PY -0.6
+param set-default CA_ROTOR0_PY -1.2
 param set-default CA_ROTOR0_PZ 0.0
 
 # Motor 1: center unit (Y = 0.0m)
@@ -32,9 +32,9 @@ param set-default CA_ROTOR1_PX 0.0
 param set-default CA_ROTOR1_PY 0.0
 param set-default CA_ROTOR1_PZ 0.0
 
-# Motor 2: right unit (Y = 0.6m from center)
+# Motor 2: right unit (Y = 1.2m from center, MATLAB b=1.2m)
 param set-default CA_ROTOR2_PX 0.0
-param set-default CA_ROTOR2_PY 0.6
+param set-default CA_ROTOR2_PY 1.2
 param set-default CA_ROTOR2_PZ 0.0
 
 # --- Three control surfaces ---
@@ -63,24 +63,23 @@ param set-default CA_SV_CS2_TRQ_R -0.5
 param set-default CA_SV_CS2_TRQ_P 0.5
 param set-default CA_SV_CS2_TRQ_Y 0.0
 
-# --- Airspeed parameters from report (cruise 10-15 m/s) ---
-param set-default FW_AIRSPD_MIN 8
-param set-default FW_AIRSPD_TRIM 12
-param set-default FW_AIRSPD_MAX 20
-param set-default FW_AIRSPD_STALL 6
+# --- Airspeed parameters (MATLAB: V0=20m/s cruise) ---
+param set-default FW_AIRSPD_MIN 15
+param set-default FW_AIRSPD_TRIM 20
+param set-default FW_AIRSPD_MAX 30
+param set-default FW_AIRSPD_STALL 8
 
-# --- Attitude control tuning for chain-wing ---
-# Tighter roll response for the semi-flexible structure
-param set-default FW_R_TC 0.4
-param set-default FW_P_TC 0.4
-param set-default FW_R_RMAX 50.0
-param set-default FW_P_RMAX_POS 40.0
-param set-default FW_P_RMAX_NEG 40.0
-param set-default FW_Y_RMAX 30.0
+# --- Attitude control tuning for chain-wing (larger inertia) ---
+param set-default FW_R_TC 0.5
+param set-default FW_P_TC 0.5
+param set-default FW_R_RMAX 30.0
+param set-default FW_P_RMAX_POS 25.0
+param set-default FW_P_RMAX_NEG 25.0
+param set-default FW_Y_RMAX 15.0
 
 # Yaw heading hold gain for chain-wing stabilization
 # Enables active heading tracking via differential thrust + rudder
 param set-default FW_YAW_STAB_SC 2.0
 
-# Pitch offset for level flight (report: ~4.5 deg trim angle of attack)
-param set-default FW_PSP_OFF 4.5
+# Pitch offset for level flight (GZ trim for larger aircraft)
+param set-default FW_PSP_OFF 2.0
