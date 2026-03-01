@@ -3,12 +3,16 @@
   Chain-Wing UAV (3-unit) Gazebo model
   Three fixed-wing units linked at wingtips forming a large aspect ratio wing.
 
-  Based on report data:
-  - Single unit: mass 0.5 kg, wingspan 0.6 m, chord 0.18 m
-  - Three-unit combined: total mass ~1.5 kg, total wingspan ~1.8 m
-  - Cruise speed: ~12 m/s, stall: ~6 m/s
-  - Trim angle of attack: 4.5 deg
-  - NACA 5412 wing airfoil, NACA 0010 tail airfoil
+  Based on MATLAB open-loop simulation data (动力学开环验证):
+  - Single unit: mass 1.9 kg, wingspan 1.2 m, chord 0.3 m, S = 0.36 m²
+  - Three-unit combined: total mass 5.7 kg, total wingspan 3.6 m
+  - Inertia per unit: J = diag([0.0894, 0.144, 0.162]) kg·m²
+  - Combined inertia (parallel axis): Ixx=5.740, Iyy=0.432, Izz=5.958
+  - Unit centers at Y = {-1.2, 0, +1.2} m
+  - Hinge points at Y = {-0.6, +0.6} m
+  - T_max = 15.0 N per motor, motorConstant = 1.5e-05
+  - alpha_0 = -0.05 rad, CLA = 5.25 /rad, CDA = 0.65
+  - Cd0 = 0.01, K_ind = 0.0313 (oswald = 0.85, AR = 12)
 
   Actuator mapping (matching 2150_chainwing airframe):
     Motor 0 (ESC1): left unit pusher    - command/motor_speed motorNumber=0
@@ -20,34 +24,34 @@
 -->
 <sdf version='1.9'>
   <model name='chainwing'>
-    <pose>0 0 0.15 0 0 0</pose>
+    <pose>0 0 0.25 0 0 0</pose>
 
     <!-- ==================== MAIN BODY (center unit fuselage) ==================== -->
     <link name='base_link'>
       <pose>0 0 0 0 0 0</pose>
       <inertial>
-        <pose>-0.04 0 0 0 0 0</pose>
-        <!-- Combined 3-unit mass: 3 × 0.5 kg = 1.5 kg -->
-        <mass>1.5</mass>
+        <pose>-0.06 0 0 0 0 0</pose>
+        <!-- Combined 3-unit mass: 3 × 1.9 kg = 5.7 kg -->
+        <mass>5.7</mass>
         <inertia>
-          <!-- Ixx: large due to wide wingspan (1.8m span) -->
-          <ixx>0.40</ixx>
+          <!-- Ixx: 3×0.0894 + 2×1.9×1.2² = 5.740 (parallel axis theorem) -->
+          <ixx>5.740</ixx>
           <ixy>0</ixy>
           <ixz>0</ixz>
-          <!-- Iyy: pitch inertia (fuselage length dominated) -->
-          <iyy>0.06</iyy>
+          <!-- Iyy: 3×0.144 = 0.432 -->
+          <iyy>0.432</iyy>
           <iyz>0</iyz>
-          <!-- Izz: very large yaw inertia (key chain-wing characteristic) -->
-          <izz>0.45</izz>
+          <!-- Izz: 3×0.162 + 2×1.9×1.2² = 5.958 -->
+          <izz>5.958</izz>
         </inertia>
       </inertial>
 
       <!-- Center fuselage collision -->
       <collision name='center_fuselage_collision'>
-        <pose>-0.10 0 0 0 0 0</pose>
+        <pose>-0.15 0 0 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.67 0.08 0.10</size>
+            <size>1.0 0.12 0.15</size>
           </box>
         </geometry>
         <surface>
@@ -66,12 +70,12 @@
         </surface>
       </collision>
 
-      <!-- Combined wing collision (3 units × 0.6m span = 1.8m) -->
+      <!-- Combined wing collision (3 units × 1.2m span = 3.6m) -->
       <collision name='wing_collision'>
-        <pose>-0.01 0 0.02 0 0 0</pose>
+        <pose>-0.01 0 0.03 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.18 1.80 0.02</size>
+            <size>0.30 3.60 0.03</size>
           </box>
         </geometry>
         <surface>
@@ -92,10 +96,10 @@
 
       <!-- Center fuselage visual -->
       <visual name='center_fuselage_visual'>
-        <pose>-0.10 0 0 0 0 0</pose>
+        <pose>-0.15 0 0 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.67 0.08 0.10</size>
+            <size>1.0 0.12 0.15</size>
           </box>
         </geometry>
         <material>
@@ -106,10 +110,10 @@
 
       <!-- Left fuselage visual -->
       <visual name='left_fuselage_visual'>
-        <pose>-0.10 -0.60 0 0 0 0</pose>
+        <pose>-0.15 -1.20 0 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.67 0.08 0.10</size>
+            <size>1.0 0.12 0.15</size>
           </box>
         </geometry>
         <material>
@@ -120,10 +124,10 @@
 
       <!-- Right fuselage visual -->
       <visual name='right_fuselage_visual'>
-        <pose>-0.10 0.60 0 0 0 0</pose>
+        <pose>-0.15 1.20 0 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.67 0.08 0.10</size>
+            <size>1.0 0.12 0.15</size>
           </box>
         </geometry>
         <material>
@@ -132,12 +136,12 @@
         </material>
       </visual>
 
-      <!-- Left wing section (left unit: Y = -0.30 to -0.90) -->
+      <!-- Left wing section (left unit: Y = -0.60 to -1.80) -->
       <visual name='left_wing_visual'>
-        <pose>-0.01 -0.60 0.02 0 0 0</pose>
+        <pose>-0.01 -1.20 0.03 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.18 0.60 0.015</size>
+            <size>0.30 1.20 0.025</size>
           </box>
         </geometry>
         <material>
@@ -146,12 +150,12 @@
         </material>
       </visual>
 
-      <!-- Center wing section (center unit: Y = -0.30 to +0.30) -->
+      <!-- Center wing section (center unit: Y = -0.60 to +0.60) -->
       <visual name='center_wing_visual'>
-        <pose>-0.01 0 0.02 0 0 0</pose>
+        <pose>-0.01 0 0.03 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.18 0.60 0.015</size>
+            <size>0.30 1.20 0.025</size>
           </box>
         </geometry>
         <material>
@@ -160,12 +164,12 @@
         </material>
       </visual>
 
-      <!-- Right wing section (right unit: Y = +0.30 to +0.90) -->
+      <!-- Right wing section (right unit: Y = +0.60 to +1.80) -->
       <visual name='right_wing_visual'>
-        <pose>-0.01 0.60 0.02 0 0 0</pose>
+        <pose>-0.01 1.20 0.03 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.18 0.60 0.015</size>
+            <size>0.30 1.20 0.025</size>
           </box>
         </geometry>
         <material>
@@ -176,10 +180,10 @@
 
       <!-- Horizontal tail (center unit) -->
       <visual name='htail_visual'>
-        <pose>-0.50 0 0 0 0 0</pose>
+        <pose>-0.55 0 0 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.10 0.40 0.008</size>
+            <size>0.20 0.90 0.012</size>
           </box>
         </geometry>
         <material>
@@ -190,10 +194,10 @@
 
       <!-- Vertical tail (center unit) -->
       <visual name='vtail_visual'>
-        <pose>-0.50 0 0.06 0 0 0</pose>
+        <pose>-0.55 0 0.09 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.08 0.008 0.10</size>
+            <size>0.12 0.012 0.15</size>
           </box>
         </geometry>
         <material>
@@ -204,10 +208,10 @@
 
       <!-- Left unit vertical tail -->
       <visual name='vtail_left_visual'>
-        <pose>-0.50 -0.60 0.06 0 0 0</pose>
+        <pose>-0.55 -1.20 0.09 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.08 0.008 0.10</size>
+            <size>0.12 0.012 0.15</size>
           </box>
         </geometry>
         <material>
@@ -218,10 +222,10 @@
 
       <!-- Right unit vertical tail -->
       <visual name='vtail_right_visual'>
-        <pose>-0.50 0.60 0.06 0 0 0</pose>
+        <pose>-0.55 1.20 0.09 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.08 0.008 0.10</size>
+            <size>0.12 0.012 0.15</size>
           </box>
         </geometry>
         <material>
@@ -230,12 +234,12 @@
         </material>
       </visual>
 
-      <!-- Wingtip connection markers (Y = ±0.30) -->
+      <!-- Wingtip connection markers (Y = ±0.60) -->
       <visual name='left_connection_visual'>
-        <pose>-0.01 -0.30 0.02 0 0 0</pose>
+        <pose>-0.01 -0.60 0.03 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.05 0.02 0.03</size>
+            <size>0.08 0.03 0.05</size>
           </box>
         </geometry>
         <material>
@@ -244,10 +248,10 @@
         </material>
       </visual>
       <visual name='right_connection_visual'>
-        <pose>-0.01 0.30 0.02 0 0 0</pose>
+        <pose>-0.01 0.60 0.03 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.05 0.02 0.03</size>
+            <size>0.08 0.03 0.05</size>
           </box>
         </geometry>
         <material>
@@ -332,7 +336,7 @@
         <geometry>
           <cylinder>
             <length>0.01</length>
-            <radius>0.03</radius>
+            <radius>0.04</radius>
           </cylinder>
         </geometry>
       </visual>
@@ -341,7 +345,7 @@
         <geometry>
           <cylinder>
             <length>0.01</length>
-            <radius>0.03</radius>
+            <radius>0.04</radius>
           </cylinder>
         </geometry>
         <surface>
@@ -373,7 +377,7 @@
         <geometry>
           <cylinder>
             <length>0.01</length>
-            <radius>0.03</radius>
+            <radius>0.04</radius>
           </cylinder>
         </geometry>
       </visual>
@@ -382,7 +386,7 @@
         <geometry>
           <cylinder>
             <length>0.01</length>
-            <radius>0.03</radius>
+            <radius>0.04</radius>
           </cylinder>
         </geometry>
         <surface>
@@ -414,7 +418,7 @@
         <geometry>
           <cylinder>
             <length>0.01</length>
-            <radius>0.025</radius>
+            <radius>0.035</radius>
           </cylinder>
         </geometry>
       </visual>
@@ -423,7 +427,7 @@
         <geometry>
           <cylinder>
             <length>0.01</length>
-            <radius>0.025</radius>
+            <radius>0.035</radius>
           </cylinder>
         </geometry>
         <surface>
@@ -440,7 +444,7 @@
     <joint name="LeftWheelJoint" type="revolute">
       <parent>base_link</parent>
       <child>LeftWheel</child>
-      <pose relative_to="base_link">-0.04 -0.30 -0.12 0 0 0</pose>
+      <pose relative_to="base_link">-0.04 -0.60 -0.20 0 0 0</pose>
       <axis>
         <xyz>0 1 0</xyz>
         <limit>
@@ -452,7 +456,7 @@
     <joint name="RightWheelJoint" type="revolute">
       <parent>base_link</parent>
       <child>RightWheel</child>
-      <pose relative_to="base_link">-0.04 0.30 -0.12 0 0 0</pose>
+      <pose relative_to="base_link">-0.04 0.60 -0.20 0 0 0</pose>
       <axis>
         <xyz>0 1 0</xyz>
         <limit>
@@ -464,7 +468,7 @@
     <joint name="NoseWheelJoint" type="revolute">
       <parent>base_link</parent>
       <child>NoseWheel</child>
-      <pose relative_to="base_link">0.20 0 -0.12 0 0 0</pose>
+      <pose relative_to="base_link">0.25 0 -0.20 0 0 0</pose>
       <axis>
         <xyz>0 1 0</xyz>
         <limit>
@@ -475,9 +479,9 @@
     </joint>
 
     <!-- ==================== PROPELLERS ==================== -->
-    <!-- Motor 0: Left unit pusher (Y = -0.6m) -->
+    <!-- Motor 0: Left unit pusher (Y = -1.2m) -->
     <link name='rotor_left'>
-      <pose>0.22 -0.60 0.0 0 1.5708 0</pose>
+      <pose>0.25 -1.20 0.0 0 1.5708 0</pose>
       <inertial>
         <pose>0 0 0 0 0 0</pose>
         <mass>0.005</mass>
@@ -518,7 +522,7 @@
 
     <!-- Motor 1: Center unit pusher (Y = 0.0m) -->
     <link name='rotor_center'>
-      <pose>0.22 0.0 0.0 0 1.5708 0</pose>
+      <pose>0.25 0.0 0.0 0 1.5708 0</pose>
       <inertial>
         <pose>0 0 0 0 0 0</pose>
         <mass>0.005</mass>
@@ -557,9 +561,9 @@
       </axis>
     </joint>
 
-    <!-- Motor 2: Right unit pusher (Y = +0.6m) -->
+    <!-- Motor 2: Right unit pusher (Y = +1.2m) -->
     <link name='rotor_right'>
-      <pose>0.22 0.60 0.0 0 1.5708 0</pose>
+      <pose>0.25 1.20 0.0 0 1.5708 0</pose>
       <inertial>
         <pose>0 0 0 0 0 0</pose>
         <mass>0.005</mass>
@@ -611,13 +615,13 @@
           <iyz>0.0</iyz>
           <izz>0.000001</izz>
         </inertia>
-        <pose>0 -0.60 0 0 0 0</pose>
+        <pose>0 -1.20 0 0 0 0</pose>
       </inertial>
       <visual name='left_elevon_visual'>
-        <pose>-0.44 -0.60 0 0 0 0</pose>
+        <pose>-0.50 -1.20 0 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.06 0.30 0.008</size>
+            <size>0.10 0.60 0.012</size>
           </box>
         </geometry>
         <material>
@@ -629,7 +633,7 @@
     <joint name='servo_0' type='revolute'>
       <parent>base_link</parent>
       <child>left_elevon</child>
-      <pose>-0.44 -0.60 0 0 0 0</pose>
+      <pose>-0.50 -1.20 0 0 0 0</pose>
       <axis>
         <xyz>0 1 0</xyz>
         <limit>
@@ -659,13 +663,13 @@
           <iyz>0.0</iyz>
           <izz>0.000001</izz>
         </inertia>
-        <pose>-0.50 0 0 0 0 0</pose>
+        <pose>-0.55 0 0 0 0 0</pose>
       </inertial>
       <visual name='elevator_visual'>
-        <pose>-0.50 0 0 0 0 0</pose>
+        <pose>-0.55 0 0 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.06 0.36 0.008</size>
+            <size>0.10 0.60 0.012</size>
           </box>
         </geometry>
         <material>
@@ -677,7 +681,7 @@
     <joint name='servo_1' type='revolute'>
       <parent>base_link</parent>
       <child>elevator</child>
-      <pose>-0.50 0 0 0 0 0</pose>
+      <pose>-0.55 0 0 0 0 0</pose>
       <axis>
         <xyz>0 1 0</xyz>
         <limit>
@@ -707,13 +711,13 @@
           <iyz>0.0</iyz>
           <izz>0.000001</izz>
         </inertia>
-        <pose>0 0.60 0 0 0 0</pose>
+        <pose>0 1.20 0 0 0 0</pose>
       </inertial>
       <visual name='right_elevon_visual'>
-        <pose>-0.44 0.60 0 0 0 0</pose>
+        <pose>-0.50 1.20 0 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.06 0.30 0.008</size>
+            <size>0.10 0.60 0.012</size>
           </box>
         </geometry>
         <material>
@@ -725,7 +729,7 @@
     <joint name='servo_2' type='revolute'>
       <parent>base_link</parent>
       <child>right_elevon</child>
-      <pose>-0.44 0.60 0 0 0 0</pose>
+      <pose>-0.50 1.20 0 0 0 0</pose>
       <axis>
         <xyz>0 1 0</xyz>
         <limit>
@@ -745,28 +749,26 @@
 
     <!-- ==================== LIFT/DRAG PLUGINS ==================== -->
     <!--
-      Aerodynamic parameters based on report:
-      - Wing airfoil: NACA 5412
-      - CL_alpha ~ 4.75 /rad (from XFLR5 analysis)
-      - CD_0 ~ 0.02, CD_alpha ~ 0.64
+      Aerodynamic parameters from MATLAB open-loop validation:
+      - 2D lift slope a0 = 2π, finite-wing corrected CLA = 5.25 /rad
+      - Zero-lift alpha: -0.05 rad
+      - Cd0 = 0.01, K_ind = 0.0313, CDA ≈ 0.65
       - alpha_stall ~ 13 deg = 0.227 rad
-      - CL_max ~ 1.48
-      - Zero-lift alpha (a0) ~ 0.05 rad (5412 has positive camber)
-      - Wing area per section: chord(0.18) × half-span(0.30) = 0.054 m²
+      - Wing area per section: chord(0.30) × span(1.20) = 0.36 m²
     -->
 
     <!-- Left wing section with left elevon control -->
     <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
-      <a0>-0.07</a0>
-      <cla>4.75</cla>
-      <cda>0.64</cda>
+      <a0>-0.05</a0>
+      <cla>5.25</cla>
+      <cda>0.65</cda>
       <cma>0.0</cma>
       <alpha_stall>0.227</alpha_stall>
-      <cla_stall>-3.85</cla_stall>
-      <cda_stall>-0.92</cda_stall>
+      <cla_stall>-4.25</cla_stall>
+      <cda_stall>-0.93</cda_stall>
       <cma_stall>0</cma_stall>
-      <cp>-0.04 -0.60 0.02</cp>
-      <area>0.108</area>
+      <cp>-0.07 -1.20 0.03</cp>
+      <area>0.36</area>
       <air_density>1.2041</air_density>
       <forward>1 0 0</forward>
       <upward>0 0 1</upward>
@@ -777,16 +779,16 @@
 
     <!-- Center wing section (no aileron control, elevator only for pitch) -->
     <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
-      <a0>-0.07</a0>
-      <cla>4.75</cla>
-      <cda>0.64</cda>
+      <a0>-0.05</a0>
+      <cla>5.25</cla>
+      <cda>0.65</cda>
       <cma>0.0</cma>
       <alpha_stall>0.227</alpha_stall>
-      <cla_stall>-3.85</cla_stall>
-      <cda_stall>-0.92</cda_stall>
+      <cla_stall>-4.25</cla_stall>
+      <cda_stall>-0.93</cda_stall>
       <cma_stall>0</cma_stall>
-      <cp>-0.04 0 0.02</cp>
-      <area>0.108</area>
+      <cp>-0.07 0 0.03</cp>
+      <area>0.36</area>
       <air_density>1.2041</air_density>
       <forward>1 0 0</forward>
       <upward>0 0 1</upward>
@@ -795,16 +797,16 @@
 
     <!-- Right wing section with right elevon control -->
     <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
-      <a0>-0.07</a0>
-      <cla>4.75</cla>
-      <cda>0.64</cda>
+      <a0>-0.05</a0>
+      <cla>5.25</cla>
+      <cda>0.65</cda>
       <cma>0.0</cma>
       <alpha_stall>0.227</alpha_stall>
-      <cla_stall>-3.85</cla_stall>
-      <cda_stall>-0.92</cda_stall>
+      <cla_stall>-4.25</cla_stall>
+      <cda_stall>-0.93</cda_stall>
       <cma_stall>0</cma_stall>
-      <cp>-0.04 0.60 0.02</cp>
-      <area>0.108</area>
+      <cp>-0.07 1.20 0.03</cp>
+      <area>0.36</area>
       <air_density>1.2041</air_density>
       <forward>1 0 0</forward>
       <upward>0 0 1</upward>
@@ -816,15 +818,15 @@
     <!-- Horizontal tail with elevator control -->
     <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
       <a0>-0.2</a0>
-      <cla>4.75</cla>
-      <cda>0.64</cda>
+      <cla>5.25</cla>
+      <cda>0.65</cda>
       <cma>0.0</cma>
       <alpha_stall>0.34</alpha_stall>
-      <cla_stall>-3.85</cla_stall>
-      <cda_stall>-0.92</cda_stall>
+      <cla_stall>-4.25</cla_stall>
+      <cda_stall>-0.93</cda_stall>
       <cma_stall>0</cma_stall>
-      <cp>-0.50 0 0</cp>
-      <area>0.050</area>
+      <cp>-0.55 0 0</cp>
+      <area>0.18</area>
       <air_density>1.2041</air_density>
       <forward>1 0 0</forward>
       <upward>0 0 1</upward>
@@ -852,8 +854,7 @@
 
     <!-- ==================== MOTOR PLUGINS ==================== -->
     <!-- Motor 0: Left unit (CCW rotation) -->
-    <!-- All motors same direction: net reaction torque = 0 for differential thrust -->
-    <!-- momentConstant reduced from 0.016 (multirotor) to 0.001 (fixed-wing pusher) -->
+    <!-- T_max = 15.0 N, motorConstant = 15.0 / 1000² = 1.5e-05 -->
     <plugin filename="gz-sim-multicopter-motor-model-system" name="gz::sim::systems::MulticopterMotorModel">
       <jointName>rotor_left_joint</jointName>
       <linkName>rotor_left</linkName>
@@ -861,7 +862,7 @@
       <timeConstantUp>0.0125</timeConstantUp>
       <timeConstantDown>0.025</timeConstantDown>
       <maxRotVelocity>1000</maxRotVelocity>
-      <motorConstant>2.45e-05</motorConstant>
+      <motorConstant>1.5e-05</motorConstant>
       <momentConstant>0.001</momentConstant>
       <commandSubTopic>command/motor_speed</commandSubTopic>
       <motorNumber>0</motorNumber>
@@ -879,7 +880,7 @@
       <timeConstantUp>0.0125</timeConstantUp>
       <timeConstantDown>0.025</timeConstantDown>
       <maxRotVelocity>1000</maxRotVelocity>
-      <motorConstant>2.45e-05</motorConstant>
+      <motorConstant>1.5e-05</motorConstant>
       <momentConstant>0.001</momentConstant>
       <commandSubTopic>command/motor_speed</commandSubTopic>
       <motorNumber>1</motorNumber>
@@ -897,7 +898,7 @@
       <timeConstantUp>0.0125</timeConstantUp>
       <timeConstantDown>0.025</timeConstantDown>
       <maxRotVelocity>1000</maxRotVelocity>
-      <motorConstant>2.45e-05</motorConstant>
+      <motorConstant>1.5e-05</motorConstant>
       <momentConstant>0.001</momentConstant>
       <commandSubTopic>command/motor_speed</commandSubTopic>
       <motorNumber>2</motorNumber>
