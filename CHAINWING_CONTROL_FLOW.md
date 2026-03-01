@@ -1127,3 +1127,207 @@ MATLAB 仿真的 `Run_Validation.m` 执行了以下验证：
 - 配平状态错误（油门/迎角错 → 起飞就失稳）
 
 开环仿真提供了**可信的物理基线**，使 GZ 闭环仿真具有工程参考价值。
+
+---
+
+## 十一、QGC "缺少参数 CP_DIST" 警告分析
+
+### 11.1 问题现象
+
+连接 QGC 后弹出警告框：
+```
+从固件中缺少参数。您可能正在运行一个不完全支持的固件版本，
+或者您的固件里有一个错误。缺少参数：1:CP_DIST
+```
+
+### 11.2 原因分析
+
+| 项目 | 说明 |
+|------|------|
+| **CP_DIST 是什么** | 碰撞避免（Collision Prevention）最小距离参数，属于 `collision_prevention` 库 |
+| **定义位置** | `src/lib/collision_prevention/collisionprevention_params.c` |
+| **默认值** | `-1.0f`（负值=禁用碰撞避免） |
+| **适用场景** | 仅用于多旋翼 Position 模式，**不适用于固定翼** |
+| **为何 QGC 报缺失** | QGC 的参数元数据文件期望所有 PX4 固件都包含此参数。如果 `collision_prevention` 库未被链接到当前构建中（或参数未在启动脚本中设置），QGC 检测不到该参数就会报警 |
+
+### 11.3 影响评估
+
+- **对飞行安全**：**无影响**。CP_DIST 仅用于多旋翼的近距离避障，链翼固定翼根本不会用到
+- **对 QGC 功能**：**无影响**。除了弹出一次警告框，QGC 所有功能正常
+- **对仿真**：**无影响**。PX4 飞控正常工作
+
+### 11.4 解决方案
+
+在 `4007_gz_chainwing` 机架文件中显式设置：
+```sh
+param set-default CP_DIST -1
+```
+- `-1` 表示禁用碰撞避免（固定翼不需要）
+- 这样 QGC 就能检测到该参数，不再弹出警告
+
+---
+
+## 十二、GZ仿真完整操作步骤
+
+### 12.1 环境准备
+
+**第一步：确认系统环境**
+```bash
+# 确认 Ubuntu 版本（建议 22.04）
+lsb_release -a
+
+# 如果是 WSL，确认 WSLg 已启用（用于显示 GZ 窗口）
+echo $DISPLAY   # 应该输出类似 :0 或 :1
+```
+
+**第二步：安装 PX4 工具链**
+```bash
+cd ~/PX4-Autopilot
+bash Tools/setup/ubuntu.sh
+```
+
+**第三步：安装 Gazebo**
+```bash
+# Ubuntu 22.04 用 gz-garden
+sudo apt install gz-garden
+
+# 或如果已安装 gz-harmonic
+sudo apt install gz-harmonic
+```
+
+**第四步：安装 QGroundControl**
+```bash
+# 在 Windows 上（WSL 场景）
+# 从 https://docs.qgroundcontrol.com/master/en/qgc-user-guide/getting_started/download_and_install.html 下载 Windows 版 QGC
+
+# 在原生 Ubuntu 上
+sudo usermod -a -G dialout $USER
+sudo apt install gstreamer1.0-plugins-bad gstreamer1.0-libav
+# 下载 QGC AppImage
+chmod +x QGroundControl.AppImage
+./QGroundControl.AppImage
+```
+
+### 12.2 构建与启动仿真
+
+**第一步：拉取最新代码**
+```bash
+cd ~/PX4-Autopilot
+git pull origin copilot/ensure-flight-stability  # 或你的分支名
+```
+
+**第二步：清理旧构建（首次或参数更改后推荐）**
+```bash
+make clean
+# 或者只删除参数缓存
+rm -f build/px4_sitl_default/rootfs/parameters.bson
+rm -f build/px4_sitl_default/rootfs/parameters_backup.bson
+```
+
+**第三步：启动仿真**
+```bash
+make px4_sitl gz_chainwing
+```
+
+等待出现：
+```
+INFO  [commander] Ready for takeoff!
+```
+
+> ⚠️ 如果没有出现 "Ready for takeoff!"，请检查：
+> - 是否有 "Preflight Fail" 消息
+> - 参数缓存是否过期（执行上面的清理步骤）
+
+### 12.3 连接 QGC
+
+**原生 Ubuntu**：
+- 直接启动 QGC，它会自动通过 UDP 14550 连接到 SITL
+
+**WSL 场景**：
+1. 在 Windows 上启动 QGC
+2. QGC → 应用设置 → 通信链接 → 添加：
+   - 类型：UDP
+   - 端口：14550
+   - 目标主机：`<WSL IP>` (在 WSL 中运行 `hostname -I` 获取)
+3. 连接
+
+> 如果弹出 "缺少参数 CP_DIST" 警告 → 点击 "Ok" 即可，已在最新代码中修复。
+
+### 12.4 预检确认
+
+在 QGC 中确认以下状态：
+- ✅ GPS: 3D Fix
+- ✅ 姿态: 正常
+- ✅ 空速: 正常
+- ✅ 电池: 正常
+- ✅ 机架类型: Fixedwing
+
+在 PX4 终端中确认参数：
+```bash
+# 确认关键链翼参数已生效
+param show FW_YAW_STAB_SC    # 应该 = 2.0
+param show CA_ROTOR_COUNT     # 应该 = 3
+param show FW_AIRSPD_TRIM     # 应该 = 20
+param show FW_THR_TRIM        # 应该 = 0.60
+param show CP_DIST            # 应该 = -1.0
+```
+
+### 12.5 起飞测试
+
+**方法A：PX4终端命令**
+```bash
+# 在 PX4 shell (pxh>) 中：
+commander arm              # 解锁
+commander takeoff          # 起飞
+```
+
+**方法B：QGC 操作**
+1. 点击左上角飞行图标进入飞行视图
+2. 滑动解锁按钮
+3. 点击 "Takeoff" 按钮
+
+### 12.6 飞行测试
+
+**增稳模式测试**（需要手动操控）：
+```bash
+commander mode stabilized     # 切换到增稳模式
+```
+- 松开摇杆 → 观察飞机是否保持航向和姿态
+- 微推偏航摇杆 → 观察航向是否平滑转向
+- 微推横滚摇杆 → 观察是否恢复水平
+
+**自主模式测试**：
+```bash
+commander mode auto:loiter    # 切换到盘旋模式
+```
+- 观察飞机是否能绕圈盘旋
+
+**降落**：
+```bash
+commander land                # 降落
+```
+
+### 12.7 实时调参（通过 QGC）
+
+1. 在 QGC 中点击左侧 **参数** 选项卡
+2. 搜索参数名（如 `FW_YAW_STAB_SC`）
+3. 修改数值，点击 Save
+4. 参数**立即生效**（无需重启）
+
+**推荐调参顺序**：
+```
+第一步: FW_PR_P / FW_RR_P / FW_YR_P → 消除振荡
+第二步: FW_YAW_STAB_SC → 调整航向保持强度
+第三步: FW_THR_TRIM → 调整巡航油门
+第四步: FW_PSP_OFF → 调整配平俯仰角
+```
+
+### 12.8 停止仿真
+
+```bash
+# 在 PX4 终端中：
+commander disarm              # 锁定
+shutdown                      # 关闭 PX4
+
+# 或直接 Ctrl+C 关闭整个仿真
+```

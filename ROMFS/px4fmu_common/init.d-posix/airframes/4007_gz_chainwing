@@ -120,6 +120,9 @@ param set-default NPFG_PERIOD 12
 # --- Takeoff ---
 param set-default RWTO_TKOFF 1
 
+# --- Collision Prevention (disabled, suppresses QGC warning) ---
+param set-default CP_DIST -1
+
 # --- Prearm ---
 param set-default COM_PREARM_MODE 2
 
