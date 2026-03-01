@@ -96,10 +96,18 @@ param set-default FW_YAW_STAB_SC 2.0
 # --- Pitch offset (MATLAB: alpha_trim ≈ 4.7°, but GZ trim is lower) ---
 param set-default FW_PSP_OFF 2.0
 
+# --- Pitch servo trim (elevator trim for straight and level flight) ---
+# rc_cessna uses -0.15; chainwing needs similar to reduce steady-state
+# integrator load on the pitch controller.
+param set-default TRIM_PITCH -0.15
+
 # --- Throttle (MATLAB: trim throttle 0.6, T_max=15N/motor) ---
 param set-default FW_THR_MAX 1.0
 param set-default FW_THR_MIN 0.05
 param set-default FW_THR_TRIM 0.60
+
+# --- Wheel control (enables ground steering during taxi/takeoff) ---
+param set-default FW_W_EN 1
 
 # --- Performance ---
 param set-default FW_T_CLMB_MAX 8
@@ -109,7 +117,7 @@ param set-default FW_P_LIM_MIN -15
 param set-default FW_LND_ANG 8
 
 # --- Mission ---
-param set-default MIS_TAKEOFF_ALT 100
+param set-default MIS_TAKEOFF_ALT 30
 param set-default NAV_ACC_RAD 20
 # --- Data link loss: disabled for SITL standalone testing ---
 # NAV_DLL_ACT=0 allows arming without QGC connection.
