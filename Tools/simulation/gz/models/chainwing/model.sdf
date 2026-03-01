@@ -835,6 +835,61 @@
       <control_joint_rad_to_cl>-4.0</control_joint_rad_to_cl>
     </plugin>
 
+    <!-- Vertical tail - center unit (passive yaw damping, no control joint) -->
+    <!-- upward=0,1,0 makes LiftDrag work in the yaw plane (side-slip → side force) -->
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>0.0</a0>
+      <cla>4.75</cla>
+      <cda>0.64</cda>
+      <cma>0.0</cma>
+      <alpha_stall>0.34</alpha_stall>
+      <cla_stall>-3.85</cla_stall>
+      <cda_stall>-0.92</cda_stall>
+      <cma_stall>0</cma_stall>
+      <cp>-0.55 0 0.09</cp>
+      <area>0.02</area>
+      <air_density>1.2041</air_density>
+      <forward>1 0 0</forward>
+      <upward>0 1 0</upward>
+      <link_name>base_link</link_name>
+    </plugin>
+
+    <!-- Vertical tail - left unit (passive yaw damping) -->
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>0.0</a0>
+      <cla>4.75</cla>
+      <cda>0.64</cda>
+      <cma>0.0</cma>
+      <alpha_stall>0.34</alpha_stall>
+      <cla_stall>-3.85</cla_stall>
+      <cda_stall>-0.92</cda_stall>
+      <cma_stall>0</cma_stall>
+      <cp>-0.55 -1.20 0.09</cp>
+      <area>0.02</area>
+      <air_density>1.2041</air_density>
+      <forward>1 0 0</forward>
+      <upward>0 1 0</upward>
+      <link_name>base_link</link_name>
+    </plugin>
+
+    <!-- Vertical tail - right unit (passive yaw damping) -->
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>0.0</a0>
+      <cla>4.75</cla>
+      <cda>0.64</cda>
+      <cma>0.0</cma>
+      <alpha_stall>0.34</alpha_stall>
+      <cla_stall>-3.85</cla_stall>
+      <cda_stall>-0.92</cda_stall>
+      <cma_stall>0</cma_stall>
+      <cp>-0.55 1.20 0.09</cp>
+      <area>0.02</area>
+      <air_density>1.2041</air_density>
+      <forward>1 0 0</forward>
+      <upward>0 1 0</upward>
+      <link_name>base_link</link_name>
+    </plugin>
+
     <!-- ==================== SERVO POSITION CONTROLLERS ==================== -->
     <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
       <joint_name>servo_0</joint_name>
@@ -872,11 +927,11 @@
       <motorType>velocity</motorType>
     </plugin>
 
-    <!-- Motor 1: Center unit (CCW rotation) -->
+    <!-- Motor 1: Center unit (CW rotation - opposite to left/right for torque balance) -->
     <plugin filename="gz-sim-multicopter-motor-model-system" name="gz::sim::systems::MulticopterMotorModel">
       <jointName>rotor_center_joint</jointName>
       <linkName>rotor_center</linkName>
-      <turningDirection>ccw</turningDirection>
+      <turningDirection>cw</turningDirection>
       <timeConstantUp>0.0125</timeConstantUp>
       <timeConstantDown>0.025</timeConstantDown>
       <maxRotVelocity>1000</maxRotVelocity>

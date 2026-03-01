@@ -3,6 +3,7 @@
 *.gch
 *.pyc
 *~
+屏幕截图*.png
 .*.swp
 .context
 .cproject
