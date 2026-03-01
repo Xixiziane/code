@@ -123,6 +123,14 @@ param set-default RWTO_TKOFF 1
 # --- Collision Prevention (disabled, suppresses QGC warning) ---
 param set-default CP_DIST -1
 
+# --- Failure Detector ---
+# FD_ESCS_EN=0: Disable ESC arming failure detection.
+# Root cause: After arming, fixed-wing motors stay at velocity=0 (no
+# throttle applied yet). The GZ bridge only sets esc_armed_flags when
+# velocity>0. After 300ms the failure detector flags FAILURE_ARM_ESC,
+# triggering failsafe and immediate disarm.
+param set-default FD_ESCS_EN 0
+
 # --- Prearm ---
 param set-default COM_PREARM_MODE 2
 
