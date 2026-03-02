@@ -100,13 +100,22 @@ float ECL_YawController::control_attitude(const float dt, const ECL_ControlData 
 
 	/* Heading hold for chain-wing yaw stabilization:
 	 * Add a yaw rate correction proportional to heading error.
-	 * This extends yaw control from pure coordinated-turn to active heading tracking,
-	 * providing the yaw self-stabilization needed for chain-wing combined flight mode.
+	 * Scale gain by (airspeed / trim_airspeed)^2 to prevent over-correction
+	 * at low speeds (landing/approach) where differential thrust authority
+	 * and vertical tail effectiveness are reduced.
 	 */
 	if (_heading_hold_gain > FLT_EPSILON &&
 	    PX4_ISFINITE(ctl_data.yaw_setpoint) && PX4_ISFINITE(ctl_data.yaw)) {
 		const float heading_error = wrap_pi(ctl_data.yaw_setpoint - ctl_data.yaw);
-		const float heading_rate_correction = heading_error * _heading_hold_gain;
+
+		/* Airspeed-dependent gain scaling: reduces gain at low speeds to prevent
+		 * yaw oscillation / spinning during landing approach. At cruise speed the
+		 * gain is 100%; at stall speed it drops to ~16%. */
+		const float airspeed_ratio = math::constrain(ctl_data.airspeed_constrained / math::max(_trim_airspeed, 1.f),
+					     0.1f, 1.0f);
+		const float scaled_gain = _heading_hold_gain * airspeed_ratio * airspeed_ratio;
+
+		const float heading_rate_correction = heading_error * scaled_gain;
 		_body_rate_setpoint += math::constrain(heading_rate_correction, -_max_rate, _max_rate);
 		_body_rate_setpoint = math::constrain(_body_rate_setpoint, -_max_rate, _max_rate);
 	}

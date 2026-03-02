@@ -68,9 +68,11 @@ public:
 	float control_attitude(const float dt, const ECL_ControlData &ctl_data) override;
 
 	void set_heading_hold_gain(float gain) { _heading_hold_gain = gain; }
+	void set_trim_airspeed(float airspeed) { _trim_airspeed = airspeed; }
 
 private:
 	float _heading_hold_gain{0.f};
+	float _trim_airspeed{15.f};
 };
 
 #endif // ECL_YAW_CONTROLLER_H

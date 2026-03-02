@@ -114,7 +114,13 @@ param set-default FW_T_CLMB_MAX 8
 param set-default FW_T_SINK_MAX 3.0
 param set-default FW_T_SINK_MIN 2.5
 param set-default FW_P_LIM_MIN -15
-param set-default FW_LND_ANG 8
+param set-default FW_LND_ANG 5
+
+# --- Landing approach: maintain sufficient airspeed ---
+param set-default FW_LND_AIRSPD 16
+param set-default FW_LND_FL_PMIN 3
+param set-default FW_LND_FL_PMAX 10
+param set-default FW_LND_FLALT 5
 
 # --- Mission ---
 param set-default MIS_TAKEOFF_ALT 30

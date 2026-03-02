@@ -84,6 +84,7 @@ FixedwingAttitudeControl::parameters_update()
 	_wheel_ctrl.set_max_rate(radians(_param_fw_w_rmax.get()));
 
 	_yaw_ctrl.set_heading_hold_gain(_param_fw_yaw_stab_sc.get());
+	_yaw_ctrl.set_trim_airspeed(_param_fw_airspd_trim.get());
 }
 
 void
