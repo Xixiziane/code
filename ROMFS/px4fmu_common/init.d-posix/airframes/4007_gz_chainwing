@@ -91,7 +91,8 @@ param set-default FW_YR_P 0.6
 param set-default FW_YR_I 0.5
 
 # --- Yaw heading hold for chain-wing stabilization ---
-param set-default FW_YAW_STAB_SC 2.0
+# Reduced from 2.0→1.0 to prevent over-correction during mode switch
+param set-default FW_YAW_STAB_SC 1.0
 
 # --- Pitch offset (MATLAB: alpha_trim ≈ 4.7°, but GZ trim is lower) ---
 param set-default FW_PSP_OFF 2.0
@@ -200,3 +201,18 @@ param set-default EKF2_ACC_B_NOISE 0.005
 
 # --- Climb limits (avoid stall at high AoA) ---
 param set-default FW_P_LIM_MAX 15
+
+# --- Stabilized mode: limit max roll to prevent stall in bank turn ---
+# At 30° bank, stall speed increases by 7.5%. At 45° (default), 19%.
+# Limiting to 35° reduces stall risk when switching from auto to stabilized.
+param set-default FW_R_LIM 35
+
+# --- Battery simulator: extend drain time for testing ---
+# Default SIM_BAT_DRAIN=60 means battery drains in 60 seconds!
+# Set to 3600 (1 hour) to prevent "Battery unhealthy" during testing.
+param set-default SIM_BAT_DRAIN 3600
+
+# --- Power supply check: circuit breaker for SITL ---
+# After a simulated crash, battery_simulator may report unhealthy state.
+# This circuit breaker allows re-arming without power supply checks.
+param set-default CBRK_SUPPLY_CHK 894281
