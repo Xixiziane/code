@@ -159,6 +159,13 @@ param set-default CP_DIST -1
 # triggering failsafe and immediate disarm.
 param set-default FD_ESCS_EN 0
 
+# --- RC Input: Accept joystick (QGC virtual sticks) or physical RC ---
+# Without this, Stabilized mode is blocked because PX4 detects
+# "manual_control_signal_lost" and refuses mode switch.
+# Value 3 = "RC or Joystick": accepts first valid source.
+# Enable QGC virtual joystick: QGC → Application Settings → Virtual Joystick
+param set-default COM_RC_IN_MODE 3
+
 # --- Prearm ---
 param set-default COM_PREARM_MODE 2
 
