@@ -123,13 +123,21 @@ param set-default FW_LND_FL_PMAX 10
 param set-default FW_LND_FLALT 5
 
 # --- Mission ---
-param set-default MIS_TAKEOFF_ALT 30
+param set-default MIS_TAKEOFF_ALT 15
 param set-default NAV_ACC_RAD 20
+param set-default NAV_LOITER_RAD 50
 # --- Data link loss: disabled for SITL standalone testing ---
 # NAV_DLL_ACT=0 allows arming without QGC connection.
 # Set to 2 (RTL) when connected to a GCS for safety.
 param set-default NAV_DLL_ACT 0
 param set-default NPFG_PERIOD 12
+
+# --- RTL (Return-To-Launch) ---
+# rc.fw_defaults sets RTL_RETURN_ALT=100, RTL_DESCEND_ALT=100,
+# RTL_LAND_DELAY=-1 (never land). Override for chainwing:
+param set-default RTL_RETURN_ALT 30
+param set-default RTL_DESCEND_ALT 15
+param set-default RTL_LAND_DELAY 0
 
 # --- Dataman: RAM mode (clears missions on each SITL restart) ---
 # SYS_DM_BACKEND=1 uses RAM-only storage. This means any mission
