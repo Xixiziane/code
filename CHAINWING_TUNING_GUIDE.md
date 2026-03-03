@@ -96,13 +96,26 @@ param show FD_ESCS_EN
 ### 2.2 确认传感器正常
 
 ```bash
-# 检查传感器状态
-sensor_accel_fifo status
-sensor_gyro_fifo status
+# 检查 IMU 数据是否正常（SITL 中使用 listener 命令查看话题数据）
+# 注意：sensor_accel_fifo 和 sensor_gyro_fifo 是 uORB 话题名，不是模块名
+# 不能用 "sensor_accel_fifo status"，应该用 listener 命令
+listener sensor_accel_fifo -n 1
+# 应显示：有加速度数据，z轴约 -9.8 m/s²
+
+listener sensor_gyro_fifo -n 1
+# 应显示：有角速度数据，静止时接近 0
+
+# 检查空速（地面静止时可能显示负值，这是正常的）
+listener airspeed -n 1
+# 地面时: indicated_airspeed_m_s 可能为 -1~+1 m/s（噪声）
+#          confidence: 0.00000（不可信，因为在地面）
+# 起飞后: indicated_airspeed_m_s 应为 15-25 m/s
+#          confidence: 1.00000（可信）
 
 # 检查 EKF2 状态
 ekf2 status
-# 应显示正常运行，无警告
+# 应显示: attitude: 1, local position: 1, global position: 1
+# "airspeed messages missed: XX" 在启动初期是正常的启动时序现象
 ```
 
 ### 2.3 确认执行器映射
