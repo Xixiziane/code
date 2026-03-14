@@ -1,5 +1,70 @@
 # 链翼无人机硬件仿真指南 (HITL Guide)
 
+## ⚡ 固件编译与烧录快速参考
+
+> **5步完成固件烧录：**
+
+```bash
+# ==========================================
+# 步骤1: 进入 PX4 源码目录
+# ==========================================
+cd ~/PX4-Autopilot    # 或你的 PX4_test 目录
+
+# ==========================================
+# 步骤2: 编译固件（根据你的飞控板选择一个）
+# ==========================================
+make px4_fmu-v6x_default      # Pixhawk 6X （推荐）
+# make px4_fmu-v5_default     # Pixhawk 4
+# make px4_fmu-v5x_default    # Pixhawk 5X
+# make px4_fmu-v6c_default    # Pixhawk 6C（Mini）
+# make px4_fmu-v6xrt_default  # Pixhawk 6X-RT
+
+# ==========================================
+# 步骤3: 用USB线连接 Pixhawk 到电脑
+# ==========================================
+
+# ==========================================
+# 步骤4: 烧录固件（自动检测串口）
+# ==========================================
+make px4_fmu-v6x_default upload
+
+# ==========================================
+# 步骤5: 在 QGC 中选择机架
+# ==========================================
+# → QGC → Vehicle Setup → Airframe
+# → 选择 "Chain-Wing UAV SIH (1103)" （硬件仿真）
+# → 或选择 "Chain-Wing UAV (2150)"    （真实飞行）
+# → Apply and Restart
+```
+
+**备选烧录方法（QGC 图形界面）：**
+1. 打开 QGC → 齿轮图标（Vehicle Setup）→ **Firmware**
+2. 用 USB 连接 Pixhawk（QGC 自动检测）
+3. 选择 **Custom firmware file...**
+4. 浏览到 `build/px4_fmu-v6x_default/px4_fmu-v6x_default.px4`
+5. 点击 OK，等待烧录完成
+
+**编译目标速查表：**
+
+| 你的飞控板 | 编译命令 | 烧录命令 |
+|-----------|---------|---------|
+| Pixhawk 6X | `make px4_fmu-v6x_default` | `make px4_fmu-v6x_default upload` |
+| Pixhawk 5X | `make px4_fmu-v5x_default` | `make px4_fmu-v5x_default upload` |
+| Pixhawk 4 | `make px4_fmu-v5_default` | `make px4_fmu-v5_default upload` |
+| Pixhawk 6C | `make px4_fmu-v6c_default` | `make px4_fmu-v6c_default upload` |
+| CUAV V5+ | `make px4_fmu-v5_default` | `make px4_fmu-v5_default upload` |
+| **SITL仿真** | `make px4_sitl gz_chainwing` | *(无需烧录)* |
+
+**机架选择：**
+
+| 用途 | 机架名称 | 机架ID | 说明 |
+|------|---------|--------|------|
+| 硬件仿真 (SIH) | Chain-Wing UAV SIH | **1103** | 板载仿真，只需 USB + QGC |
+| 真实飞行 | Chain-Wing UAV | **2150** | 连接真实电机和舵机 |
+| 桌面仿真 (SITL) | gz_chainwing | **4007** | 纯软件，无需硬件 |
+
+---
+
 ## 目录
 
 1. [硬件仿真概述](#1-硬件仿真概述)
