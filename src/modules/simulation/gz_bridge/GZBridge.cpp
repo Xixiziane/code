@@ -128,7 +128,7 @@ int GZBridge::init()
 				remove_req.set_type(gz::msgs::Entity::MODEL);
 
 				gz::msgs::Boolean remove_rep;
-				bool remove_result;
+				bool remove_result = false;
 				std::string remove_service = "/world/" + _world_name + "/remove";
 
 				_node.Request(remove_service, remove_req, 1000, remove_rep, remove_result);
