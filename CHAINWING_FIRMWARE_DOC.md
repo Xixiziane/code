@@ -327,21 +327,29 @@ param set-default CA_ROTOR2_PY 1.2     # 右电机位置
 
 #### 解决方案
 
-在 `ecl_yaw_controller.cpp` 中新增**航向保持反馈**：
+在 `ecl_yaw_controller.cpp` 中新增**航向保持反馈**，并抑制低速协调转弯：
 
 ```
-新偏航速率 = 协调转弯偏航速率 + 航向保持修正
-
-航向保持修正 = heading_error × scaled_gain
+新偏航速率 = 协调转弯偏航速率 × airspeed_ratio²
+           + heading_error × scaled_gain
 
 其中:
-  heading_error = wrap_pi(yaw_setpoint - yaw_actual)
-  scaled_gain   = FW_YAW_STAB_SC × (airspeed / trim_airspeed)²
+  airspeed_ratio = clamp(airspeed / trim_airspeed, 0, 1)
+  heading_error  = wrap_pi(yaw_setpoint - yaw_actual)
+  scaled_gain    = FW_YAW_STAB_SC × clamp(airspeed_ratio, 0.5, 1)²
 ```
+
+> **关键设计**：协调转弯率按 airspeed_ratio² 衰减，在地面（低空速）
+> 时几乎为零，避免因微小横滚偏移触发差动推力偏航打转。
+> 航向保持增益下限提高到 0.5（最小增益 0.25），确保地面有
+> 足够的航向修正权威性。
 
 #### 空速依赖增益缩放
 
-这是防止低速打转的关键设计：
+这是防止低速打转的关键设计。新版本使用两层缩放：
+
+1. **协调转弯率** 按 `(V/V_trim)²` 缩放，下限 0（地面为零）
+2. **航向保持增益** 按 `clamp(V/V_trim, 0.5, 1)²` 缩放，下限 0.25
 
 ```
                  增益 (相对巡航)
@@ -349,36 +357,41 @@ param set-default CA_ROTOR2_PY 1.2     # 右电机位置
                      /
      56% ──────────●    (15 m/s 接近)
                   /
-     25% ──────●        (10 m/s 降落)
-              /
-     16% ────●          (8 m/s 失速)
-            /
-      0% ──●
-            0    5   10   15   20   25   30
-                      空速 (m/s)
+     25% ──────●        (10 m/s 降落 / 地面下限)
+              │
+     25% ─────●          (8 m/s 失速)
+              │
+     25% ─────●          (0 m/s 地面)
+              0    5   10   15   20   25   30
+                       空速 (m/s)
 ```
 
-**物理依据**：低速飞行时，差动推力和垂直尾翼的偏航控制效率都下降，如果增益不随空速衰减，会导致过修正 → 正反馈 → 打转。
+**物理依据**：在地面滑行或低速时，标准协调转弯公式 `tan(roll) × g / airspeed`
+会因分母很小而产生极大的偏航率指令。对于差动推力飞机，电机在地面就有完整的
+推力权威性（不像气动舵面需要空速），导致微小的横滚偏移就触发猛烈偏航 → 打转。
+新的双层缩放确保地面时协调转弯被彻底抑制，同时航向保持增益保持在 0.25 以上。
 
 #### 代码实现
 
-**文件**: `src/modules/fw_att_control/ecl_yaw_controller.cpp` (第 101-121 行)
+**文件**: `src/modules/fw_att_control/ecl_yaw_controller.cpp` (第 101-135 行)
 
 ```cpp
-/* 航向保持 — 链翼偏航增稳 */
+/* 航向保持 — 链翼偏航增稳（含低速协调转弯抑制） */
 if (_heading_hold_gain > FLT_EPSILON &&
     PX4_ISFINITE(ctl_data.yaw_setpoint) && PX4_ISFINITE(ctl_data.yaw)) {
 
-    // 计算航向误差
-    const float heading_error = wrap_pi(ctl_data.yaw_setpoint - ctl_data.yaw);
-
-    // 空速依赖增益缩放: (V / V_trim)²
     const float airspeed_ratio = math::constrain(
         ctl_data.airspeed_constrained / math::max(_trim_airspeed, 1.f),
-        0.1f, 1.0f);
-    const float scaled_gain = _heading_hold_gain * airspeed_ratio * airspeed_ratio;
+        0.0f, 1.0f);
 
-    // P 控制: 航向误差 × 缩放增益 → 偏航速率修正
+    // 1. 协调转弯率按 airspeed_ratio² 衰减（地面≈0）
+    _body_rate_setpoint *= airspeed_ratio * airspeed_ratio;
+
+    // 2. 航向保持修正，增益下限 0.5 → 最小增益 0.25
+    const float heading_error = wrap_pi(ctl_data.yaw_setpoint - ctl_data.yaw);
+    const float heading_gain_ratio = math::constrain(airspeed_ratio, 0.5f, 1.0f);
+    const float scaled_gain = _heading_hold_gain * heading_gain_ratio * heading_gain_ratio;
+
     const float heading_rate_correction = heading_error * scaled_gain;
     _body_rate_setpoint += math::constrain(heading_rate_correction, -_max_rate, _max_rate);
     _body_rate_setpoint = math::constrain(_body_rate_setpoint, -_max_rate, _max_rate);
@@ -581,15 +594,17 @@ Tools/simulation/gz/models/chainwing/
 
 #### 6.2.1 ecl_yaw_controller.cpp — 航向保持算法
 
-**位置**: 第 101-121 行（`control_attitude` 函数末尾）
+**位置**: 第 101-135 行（`control_attitude` 函数末尾）
 
 **修改内容**:
 - 在标准协调转弯计算之后，新增航向误差比例反馈
-- 增益按 `(V/V_trim)²` 缩放，防止低速过修正
+- **低速协调转弯抑制**: 将协调转弯体速率按 `(V/V_trim)²` 缩放（下限 0），
+  防止地面滑行时微小横滚偏移触发差动推力偏航打转
+- 增益按 `clamp(V/V_trim, 0.5, 1)²` 缩放，下限 0.25，确保地面航向修正权威性
 - 使用 `wrap_pi()` 正确处理 ±π 边界
 - 结果受 `_max_rate` 限制（防止饱和）
 
-**代码行数**: +21 行（不含注释）
+**代码行数**: +35 行（不含注释）
 
 #### 6.2.2 ecl_yaw_controller.h — 接口扩展
 
@@ -907,6 +922,7 @@ FW_YAW_STAB_SC = 2.0  → 推荐硬件值（真实环境扰动更大）
 | 8 | 增稳模式切换时坠落 | FW_YAW_STAB_SC过大 + FW_R_LIM过大 | SC→1.0, R_LIM→35° | 4007_gz_chainwing |
 | 9 | RTL 爬升到100m盘旋不降落 | RTL_RETURN_ALT=100, LAND_DELAY=-1 | 调整RTL参数 | 4007_gz_chainwing |
 | 10 | 旧任务阻止启动 | 持久存储保留旧任务 | SYS_DM_BACKEND=1 | 4007_gz_chainwing |
+| 11 | 增稳模式地面打转 | 协调转弯公式在低空速放大 + 航向保持增益下限过低 | 协调转弯率按airspeed²衰减 + 增益下限0.5 | ecl_yaw_controller.cpp |
 
 ### 10.2 重要发现
 
@@ -916,7 +932,21 @@ FW_YAW_STAB_SC = 2.0  → 推荐硬件值（真实环境扰动更大）
 
 **修复**: 添加 3 个垂直尾翼 LiftDrag 插件，`<upward>0 1 0</upward>`，面积 0.02 m²。
 
-#### 发现 2: 空速依赖增益缩放是关键
+#### 发现 2: 协调转弯在地面的放大效应
+
+标准 PX4 协调转弯公式 `tan(roll) × g / airspeed` 在低空速时产生极大偏航率。
+对于有方向舵的传统飞机，舵面效率随空速下降，自然抑制了该指令。
+但链翼用差动推力控制偏航，电机在地面就有完整权威性：
+
+```
+低空速 → g/airspeed 极大 → 即使 1° 横滚 → 大偏航率指令
+差动推力在地面就能执行 → 飞机打转
+```
+
+**修复**: 航向保持激活时，将协调转弯率按 `(V/V_trim)²` 衰减（地面≈0），
+同时航向保持增益下限提高到 0.5（最小增益 0.25），确保修正权威性。
+
+#### 发现 3: 空速依赖增益缩放是关键
 
 最初的航向保持增益在所有速度下恒定。巡航时工作良好，但在降落接近时（速度降低到 15→10→8 m/s），恒定增益导致过修正：
 

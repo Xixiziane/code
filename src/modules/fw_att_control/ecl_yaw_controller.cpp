@@ -98,22 +98,36 @@ float ECL_YawController::control_attitude(const float dt, const ECL_ControlData 
 		_body_rate_setpoint = 0.0f;
 	}
 
-	/* Heading hold for chain-wing yaw stabilization:
-	 * Add a yaw rate correction proportional to heading error.
-	 * Scale gain by (airspeed / trim_airspeed)^2 to prevent over-correction
-	 * at low speeds (landing/approach) where differential thrust authority
-	 * and vertical tail effectiveness are reduced.
+	/* Chain-wing heading hold for yaw stabilization via differential thrust.
+	 *
+	 * The coordinated-turn formula (line 88) computes yaw rate from
+	 * tan(roll) * g / airspeed.  At low airspeed this value is large
+	 * even for tiny roll angles, but on the ground the aircraft has full
+	 * differential-thrust authority.  The result is aggressive ground
+	 * spinning whenever the roll stick is not perfectly centred.
+	 *
+	 * Fix: scale the coordinated-turn body-rate by airspeed_ratio² so it
+	 * fades to near-zero on the ground, and clamp the heading-hold gain
+	 * floor to 0.5 so heading corrections remain authoritative.
 	 */
 	if (_heading_hold_gain > FLT_EPSILON &&
 	    PX4_ISFINITE(ctl_data.yaw_setpoint) && PX4_ISFINITE(ctl_data.yaw)) {
-		const float heading_error = wrap_pi(ctl_data.yaw_setpoint - ctl_data.yaw);
 
-		/* Airspeed-dependent gain scaling: reduces gain at low speeds to prevent
-		 * yaw oscillation / spinning during landing approach. At cruise speed the
-		 * gain is 100%; at stall speed it drops to ~16%. */
-		const float airspeed_ratio = math::constrain(ctl_data.airspeed_constrained / math::max(_trim_airspeed, 1.f),
-					     0.1f, 1.0f);
-		const float scaled_gain = _heading_hold_gain * airspeed_ratio * airspeed_ratio;
+		const float airspeed_ratio = math::constrain(
+						     ctl_data.airspeed_constrained / math::max(_trim_airspeed, 1.f),
+						     0.0f, 1.0f);
+
+		/* 1. Scale coordinated-turn contribution by airspeed_ratio² to
+		 *    suppress spurious yaw commands at low airspeed / on ground. */
+		_body_rate_setpoint *= airspeed_ratio * airspeed_ratio;
+
+		/* 2. Heading-hold correction with raised minimum gain floor.
+		 *    Floor 0.5 → minimum gain = 0.25 (vs old 0.01 with floor 0.1).
+		 *    This ensures the heading hold can always overpower the
+		 *    (now-scaled) coordinated-turn residual. */
+		const float heading_error = wrap_pi(ctl_data.yaw_setpoint - ctl_data.yaw);
+		const float heading_gain_ratio = math::constrain(airspeed_ratio, 0.5f, 1.0f);
+		const float scaled_gain = _heading_hold_gain * heading_gain_ratio * heading_gain_ratio;
 
 		const float heading_rate_correction = heading_error * scaled_gain;
 		_body_rate_setpoint += math::constrain(heading_rate_correction, -_max_rate, _max_rate);
