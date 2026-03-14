@@ -440,6 +440,7 @@ chainwing/
 | `ecl_yaw_controller.h` | **核心修改** | +5行 | 新增成员变量和接口 |
 | `FixedwingAttitudeControl.cpp` | **核心修改** | +20行 | 航向设定值管理 |
 | `FixedwingAttitudeControl.hpp` | **核心修改** | +2行 | 新增成员变量 |
+| `GZBridge.cpp` | **重要修改** | +14行 | 重启时自动清除旧模型 |
 | `4007_gz_chainwing` | **新建文件** | 219行 | 机架配置 |
 | `model.sdf` | **新建文件** | 968行 | Gazebo 仿真模型 |
 | `model.config` | **新建文件** | 12行 | 模型元数据 |
@@ -820,7 +821,7 @@ param set-default FW_LND_ABORT  0   # 禁用所有着陆中止条件
 
 **效果**：着陆改为使用航点海拔高度而非地形测量值，在平坦地形上完全可靠。
 
-#### 问题 #12 详细分析：GPS/EKF/罗盘缺失（使用 flat_terrain 世界时）
+#### 问题 #12 详细分析：GPS/EKF/罗盘缺失（第二次飞行任务时）
 
 **错误信息**（QGC 预飞检查失败）：
 ```
@@ -829,43 +830,44 @@ EKF not ready
 Compass missing
 ```
 
-**根本原因**：flat_terrain.sdf 世界文件与 default.sdf 存在参数差异，可能导致：
-1. GZ 物理引擎初始化行为不同（碰撞面 2000×2000 vs 1×1、摩擦力 mu=100 vs 默认）
-2. GZ 启动速度变慢 → gz_bridge 的 EntityFactory 服务调用超时（1秒限制）
-3. gz_bridge 初始化失败 → 传感器模拟器（GPS/Mag/Baro）不会启动
-4. 缺少 `<spherical_coordinates>` 可能影响 GZ 地理参考系统
+**根本原因**：第一次飞行完成后停止 PX4，GZ 仍在后台运行。第二次启动 PX4 时，
+旧的 `chainwing_0` 模型仍存在于 GZ 中，EntityFactory 因 `allow_renaming=false`
+无法创建同名模型 → gz_bridge 启动失败 → 所有传感器模拟器不启动。
 
-**传感器数据链路**：
+**问题链**：
 ```
-GZ 启动世界 → gz_bridge 连接 (/world/flat_terrain/create, 1秒超时)
-  ├─ 失败 → PX4_ERROR → 传感器模拟器不启动 → GPS/EKF/罗盘全部缺失
-  └─ 成功 → 订阅 clock/pose/imu/baro 话题
-       → sensor_gps_sim start    (依赖 groundtruth 位置)
-       → sensor_mag_sim start    (依赖 GPS 定位)
-       → sensor_airspeed_sim start
+第1次运行: GZ 启动 → 创建 chainwing_0 → 飞行正常 → 停止 PX4
+                                                    ↓
+                                          GZ 仍在运行，chainwing_0 仍存在
+                                                    ↓
+第2次运行: 检测到 GZ 已运行 → 重用世界 → EntityFactory("chainwing_0")
+   → 失败：模型已存在 + allow_renaming=false → gz_bridge 启动失败
+   → sensor_gps_sim / sensor_mag_sim 不启动 → GPS/EKF/罗盘缺失
 ```
 
-**解决方案**：
-1. **碰撞面大小**：改为 `<size>1 1</size>`（与 default.sdf 一致，平面碰撞无论如何都是无限的）
-2. **摩擦参数**：改为 `<ode/>`（与 default.sdf 一致）
-3. **添加 spherical_coordinates**：确保 GZ 地理参考系统正确初始化
-4. **保留 2000×2000 视觉平面**：满足固定翼大范围飞行的视觉需求
+**解决方案**（GZBridge.cpp 代码修改）：
+
+在 `GZBridge::init()` 的 EntityFactory 创建调用之前，先调用 `/world/$WORLD/remove`
+服务删除同名旧模型：
+
+```cpp
+// 删除已存在的同名模型（处理 PX4 重启而 GZ 仍在运行的场景）
+gz::msgs::Entity remove_req{};
+remove_req.set_name(_model_name);
+remove_req.set_type(gz::msgs::Entity::MODEL);
+std::string remove_service = "/world/" + _world_name + "/remove";
+_node.Request(remove_service, remove_req, 1000, rep, result);
+// 首次运行时移除失败是正常的（模型不存在）
+```
 
 **排查步骤**（如果仍然出现问题）：
 ```bash
-# 1. 杀掉所有残留 GZ 进程（最常见原因！）
+# 1. 杀掉所有残留 GZ 进程
 pkill -f "gz sim"
 pkill -f "ruby.*gz"
 
-# 2. 清理构建缓存
-cd ~/PX4-Autopilot
-make clean
-
-# 3. 重新构建并启动
+# 2. 重新启动
 make px4_sitl gz_chainwing
-
-# 4. 如果仍有问题，手动指定默认世界测试
-PX4_GZ_WORLD=default make px4_sitl gz_chainwing
 ```
 
 > **⚠️ 最常见原因**：上一次仿真的 GZ 进程仍在运行（world name = "default"），但 gz_bridge 尝试连接 "flat_terrain" 世界。启动脚本会检测到已运行的 GZ 并跳过启动新世界，但世界名称不匹配导致所有传感器话题订阅失败。**解决方法：运行前先 `pkill -f "gz sim"`**。

@@ -70,6 +70,27 @@ int GZBridge::init()
 {
 	if (!_model_sim.empty()) {
 
+		// Remove any existing model with the same name (handles PX4 restart
+		// while Gazebo is still running from a previous session)
+		{
+			gz::msgs::Entity remove_req{};
+			remove_req.set_name(_model_name);
+			remove_req.set_type(gz::msgs::Entity::MODEL);
+
+			gz::msgs::Boolean remove_rep;
+			bool remove_result;
+			std::string remove_service = "/world/" + _world_name + "/remove";
+
+			if (_node.Request(remove_service, remove_req, 1000, remove_rep, remove_result)) {
+				if (remove_rep.data() && remove_result) {
+					PX4_INFO("Removed existing model: %s", _model_name.c_str());
+				}
+
+			}
+
+			// Ignore failure: model may not exist on first run
+		}
+
 		// service call to create model
 		gz::msgs::EntityFactory req{};
 		req.set_sdf_filename(_model_sim + "/model.sdf");
