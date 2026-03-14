@@ -1,0 +1,130 @@
+#!/bin/sh
+#
+# @name Chain-Wing UAV SIH (3-unit fixed-wing)
+#
+# @type Simulation
+# @class Plane
+#
+# Simulator-In-Hardware configuration for the chain-wing UAV.
+# Three fixed-wing units linked at wingtips with differential thrust
+# yaw control. Uses SIH module for onboard physics simulation.
+#
+# Motor/surface mapping:
+# @output HIL_ACT_FUNC1 Servo 0 - Left Elevon (reversed)
+# @output HIL_ACT_FUNC2 Servo 1 - Elevator (center)
+# @output HIL_ACT_FUNC3 Servo 2 - Right Elevon (reversed)
+# @output HIL_ACT_FUNC4 Motor 0 - Left unit
+# @output HIL_ACT_FUNC5 Motor 1 - Center unit
+# @output HIL_ACT_FUNC6 Motor 2 - Right unit
+#
+# @board px4_fmu-v2 exclude
+#
+
+. ${R}etc/init.d/rc.fw_defaults
+
+param set UAVCAN_ENABLE 0
+
+# --- Airframe type ---
+param set-default CA_AIRFRAME 1
+
+# --- Three motors for differential thrust yaw control ---
+param set-default CA_ROTOR_COUNT 3
+
+# Motor 0: left unit (Y = -1.2m, MATLAB b=1.2m)
+param set-default CA_ROTOR0_PX 0.0
+param set-default CA_ROTOR0_PY -1.2
+param set-default CA_ROTOR0_PZ 0.0
+
+# Motor 1: center unit (Y = 0.0m)
+param set-default CA_ROTOR1_PX 0.0
+param set-default CA_ROTOR1_PY 0.0
+param set-default CA_ROTOR1_PZ 0.0
+
+# Motor 2: right unit (Y = 1.2m)
+param set-default CA_ROTOR2_PX 0.0
+param set-default CA_ROTOR2_PY 1.2
+param set-default CA_ROTOR2_PZ 0.0
+
+# --- Three control surfaces ---
+param set-default CA_SV_CS_COUNT 3
+
+# CS0: Left unit - Right Elevon (reversed for chain-wing)
+param set-default CA_SV_CS0_TYPE 6
+param set-default CA_SV_CS0_TRQ_R 0.5
+param set-default CA_SV_CS0_TRQ_P 0.5
+param set-default CA_SV_CS0_TRQ_Y 0.0
+
+# CS1: Center unit - Elevator
+param set-default CA_SV_CS1_TYPE 3
+param set-default CA_SV_CS1_TRQ_R 0.0
+param set-default CA_SV_CS1_TRQ_P 1.0
+param set-default CA_SV_CS1_TRQ_Y 0.0
+
+# CS2: Right unit - Left Elevon (reversed for chain-wing)
+param set-default CA_SV_CS2_TYPE 5
+param set-default CA_SV_CS2_TRQ_R -0.5
+param set-default CA_SV_CS2_TRQ_P 0.5
+param set-default CA_SV_CS2_TRQ_Y 0.0
+
+# --- HIL actuator function mapping ---
+# Servos first, then motors (matches SIH internal ordering)
+param set-default HIL_ACT_FUNC1 201
+param set-default HIL_ACT_FUNC2 202
+param set-default HIL_ACT_FUNC3 203
+param set-default HIL_ACT_FUNC4 101
+param set-default HIL_ACT_FUNC5 102
+param set-default HIL_ACT_FUNC6 103
+
+# --- SYS_HITL=2: SIH mode (onboard physics, no external simulator) ---
+param set-default SYS_HITL 2
+
+# --- Safety: disable checks for simulation ---
+param set-default CBRK_SUPPLY_CHK 894281
+param set-default CBRK_IO_SAFETY 22027
+
+param set-default BAT_N_CELLS 4
+
+# --- SIH aircraft parameters (from MATLAB model) ---
+# Total mass: 3 units × 0.25 kg/unit + payload ≈ 1.0 kg
+param set SIH_MASS 1.0
+
+# Inertia (from MATLAB: Ixx=1.02, Iyy=0.164, Izz=1.17 kg·m²)
+param set SIH_IXX 1.02
+param set SIH_IYY 0.164
+param set SIH_IZZ 1.17
+param set SIH_IXZ 0.01
+
+# Max thrust per motor (3 motors × 5N each)
+param set SIH_T_MAX 15.0
+
+# Drag coefficient (adjusted for 3-unit span)
+param set SIH_KDV 0.5
+
+# Vehicle type: fixed-wing
+param set SIH_VEHICLE_TYPE 1
+
+# Runway takeoff
+param set RWTO_TKOFF 1
+
+# --- Airspeed parameters ---
+param set-default FW_AIRSPD_MIN 15
+param set-default FW_AIRSPD_TRIM 20
+param set-default FW_AIRSPD_MAX 30
+param set-default FW_AIRSPD_STALL 8
+
+# --- Attitude control ---
+param set-default FW_R_TC 0.5
+param set-default FW_P_TC 0.5
+param set-default FW_R_RMAX 30.0
+param set-default FW_P_RMAX_POS 25.0
+param set-default FW_P_RMAX_NEG 25.0
+param set-default FW_Y_RMAX 15.0
+
+# --- Yaw heading hold ---
+param set-default FW_YAW_STAB_SC 2.0
+
+# --- Pitch offset ---
+param set-default FW_PSP_OFF 2.0
+
+# --- Throttle ---
+param set-default FW_THR_TRIM 0.60

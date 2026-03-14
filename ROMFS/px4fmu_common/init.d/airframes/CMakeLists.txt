@@ -40,6 +40,7 @@ px4_add_romfs_files(
 	1100_rc_quad_x_sih.hil
 	1101_rc_plane_sih.hil
 	1102_tailsitter_duo_sih.hil
+	1103_chainwing_sih.hil
 
 	# [2000, 2999] Standard planes"
 	2100_standard_plane
