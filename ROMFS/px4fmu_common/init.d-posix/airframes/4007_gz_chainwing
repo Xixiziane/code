@@ -11,7 +11,7 @@
 . ${R}etc/init.d/rc.fw_defaults
 
 PX4_SIMULATOR=${PX4_SIMULATOR:=gz}
-PX4_GZ_WORLD=${PX4_GZ_WORLD:=default}
+PX4_GZ_WORLD=${PX4_GZ_WORLD:=flat_terrain}
 PX4_SIM_MODEL=${PX4_SIM_MODEL:=chainwing}
 
 param set-default SIM_GZ_EN 1
@@ -122,6 +122,22 @@ param set-default FW_LND_AIRSPD 16
 param set-default FW_LND_FL_PMIN 3
 param set-default FW_LND_FL_PMAX 10
 param set-default FW_LND_FLALT 5
+
+# --- Terrain estimation: disabled (no rangefinder in GZ model) ---
+# FW_LND_USETER=0: Use landing waypoint altitude instead of terrain
+# estimate. Required because:
+#   1. Chainwing model has no rangefinder/lidar sensor
+#   2. GZ bridge does not subscribe to lidar data
+#   3. No sensor_distance_sim module exists in PX4 SITL
+# Without this, landing aborts with "No terrain measurement result"
+# after TERRAIN_ALT_FIRST_MEASUREMENT_TIMEOUT (5s).
+param set-default FW_LND_USETER 0
+
+# FW_LND_ABORT=0: Disable automatic landing abort conditions.
+# Default (3) aborts if terrain not found (bit 0) or times out (bit 1).
+# With FW_LND_USETER=0 these are ignored anyway, but set explicitly
+# for clarity.
+param set-default FW_LND_ABORT 0
 
 # --- Mission ---
 param set-default MIS_TAKEOFF_ALT 15

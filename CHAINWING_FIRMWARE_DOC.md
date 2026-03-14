@@ -336,8 +336,25 @@ if (fabsf(yaw_stick) > 0.05f) {
 
 ### 5.1 模型文件
 
-- **路径**：`Tools/simulation/gz/models/chainwing/model.sdf`（968行）
+- **飞行器模型路径**：`Tools/simulation/gz/models/chainwing/model.sdf`（968行）
+- **世界文件路径**：`Tools/simulation/gz/worlds/flat_terrain.sdf`
 - **格式**：SDF 1.9（Gazebo Harmonic 格式）
+
+### 5.1b 超大平地仿真世界（flat_terrain）
+
+为解决固定翼起降测试中地面范围不足的问题，创建了 `flat_terrain.sdf` 世界文件：
+
+| 特性 | 默认世界 (default.sdf) | 超大平地 (flat_terrain.sdf) |
+|------|----------------------|---------------------------|
+| 地面尺寸（碰撞） | 1×1 m | **2000×2000 m** |
+| 地面尺寸（视觉） | 100×100 m | **2000×2000 m** |
+| 地面摩擦力 | 默认 | mu=100, mu2=50 |
+| 跑道标记 | 无 | **200m×2m 深色中心线** |
+| 物理步长 | 0.004s (250Hz) | 0.004s (250Hz) |
+
+机架配置中使用 `PX4_GZ_WORLD=flat_terrain` 自动加载该世界。
+
+> **注意**：Gazebo 的 `<plane>` 几何体在碰撞检测中实际表现为无限平面，但视觉渲染尺寸决定了可见范围。将视觉尺寸设为 2000m 确保飞机在盘旋/着陆时始终能看到地面。
 
 ### 5.2 模型结构
 
@@ -633,6 +650,10 @@ bool _heading_setpoint_initialized{false};
 | FW_LND_FL_PMIN | 3 | 拉平最小俯仰 (°) |
 | FW_LND_FL_PMAX | 10 | 拉平最大俯仰 (°) |
 | FW_LND_FLALT | 5 | 拉平高度 (m) |
+| **FW_LND_USETER** | **0** | **禁用地形估计**（无测距仪，使用航点高度着陆） |
+| **FW_LND_ABORT** | **0** | **禁用着陆中止**（无地形传感器时必须禁用） |
+
+> ⚠️ **重要**：`FW_LND_USETER=0` 是防止 "No terrain measurement result" 着陆中止错误的关键参数。详见[第10.1节 问题#11](#101-已解决的问题)。
 
 ### 7.9 SITL 仿真参数
 
@@ -760,6 +781,40 @@ MATLAB 开环模型                    PX4 + Gazebo 闭环仿真
 | 8 | "Switching to STAB not available" | 无手动控制输入 | COM_RC_IN_MODE=3 | 51bbee0 |
 | 9 | 电池60秒耗尽 | SIM_BAT_DRAIN 默认值 | SIM_BAT_DRAIN=3600 | 6d09703 |
 | 10 | 电池故障保护中断飞行 | COM_LOW_BAT_ACT 触发 Hold/RTL | COM_LOW_BAT_ACT=0 | 本次提交 |
+| 11 | **着陆中止：No terrain measurement** | 无测距仪+FW_LND_USETER=1+FW_LND_ABORT=3 | FW_LND_USETER=0, FW_LND_ABORT=0 | 本次提交 |
+
+#### 问题 #11 详细分析：着陆中止 "No terrain measurement result"
+
+**错误信息**：
+```
+WARN  [navigator] Landing aborted: terrain measurement not found
+```
+
+**触发条件**：
+1. `FW_LND_USETER=1`（默认值，使用地形估计触发拉平）
+2. `FW_LND_ABORT=3`（默认值，bit 0=1 → 地形未找到时中止）
+3. 链翼模型**没有测距仪/激光雷达传感器**
+4. GZ 桥接器**不订阅 lidar/LaserScan 话题**
+5. PX4 SITL 中**不存在 sensor_distance_sim 模块**
+
+**代码路径** (`FixedwingPositionControl.cpp:getLandingTerrainAltitudeEstimate()`):
+```
+FW_LND_USETER > 0 → 检查 dist_bottom_valid
+  → false（无测距仪，EKF2 无 dist_bottom）
+    → 从未有过有效测量
+      → 超时（TERRAIN_ALT_FIRST_MEASUREMENT_TIMEOUT = 5s）
+        → FW_LND_ABORT bit 0 = 1
+          → updateLandingAbortStatus(TERRAIN_NOT_FOUND)
+            → "Landing aborted: terrain measurement not found"
+```
+
+**解决方案**：
+```bash
+param set-default FW_LND_USETER 0   # 禁用地形估计，使用航点高度
+param set-default FW_LND_ABORT  0   # 禁用所有着陆中止条件
+```
+
+**效果**：着陆改为使用航点海拔高度而非地形测量值，在平坦地形上完全可靠。
 
 ### 10.2 已知问题（调试中）
 
@@ -886,9 +941,10 @@ make px4_sitl gz_chainwing
 
 | 文件路径 | 行数 | 说明 |
 |----------|------|------|
-| `ROMFS/px4fmu_common/init.d-posix/airframes/4007_gz_chainwing` | 223 | 机架配置 |
+| `ROMFS/px4fmu_common/init.d-posix/airframes/4007_gz_chainwing` | 241 | 机架配置 |
 | `Tools/simulation/gz/models/chainwing/model.sdf` | 968 | Gazebo 仿真模型 |
 | `Tools/simulation/gz/models/chainwing/model.config` | 12 | 模型元数据 |
+| `Tools/simulation/gz/worlds/flat_terrain.sdf` | 147 | 超大平地仿真世界 (2000×2000m) |
 | `CHAINWING_FIRMWARE_DOC.md` | 本文件 | 固件技术文档 |
 | `CHAINWING_CONTROL_FLOW.md` | ~1600 | 控制流程详解 |
 | `CHAINWING_TUNING_GUIDE.md` | ~800 | 调参指南 |
@@ -928,6 +984,8 @@ make px4_sitl gz_chainwing
 | NAV_DLL_ACT | 0 | 数据链丢失无动作 |
 | SYS_DM_BACKEND | 1 | RAM 模式 |
 | CP_DIST | -1 | 禁用碰撞预防 |
+| **FW_LND_USETER** | **0** | **禁用地形估计（无测距仪）** |
+| **FW_LND_ABORT** | **0** | **禁用着陆中止条件** |
 
 ### B.3 飞行性能参数
 
