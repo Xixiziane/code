@@ -346,14 +346,17 @@ if (fabsf(yaw_stick) > 0.05f) {
 
 | 特性 | 默认世界 (default.sdf) | 超大平地 (flat_terrain.sdf) |
 |------|----------------------|---------------------------|
-| 地面尺寸（碰撞） | 1×1 m | **2000×2000 m** |
+| 地面尺寸（碰撞） | 1×1 m | 1×1 m（碰撞平面始终无限） |
 | 地面尺寸（视觉） | 100×100 m | **2000×2000 m** |
-| 地面摩擦力 | 默认 | mu=100, mu2=50 |
+| 地面摩擦力 | 默认 ODE | 默认 ODE（与 default 一致） |
+| spherical_coordinates | 无 | **有**（47.397742°N, 8.545594°E） |
 | 跑道标记 | 无 | **200m×2m 深色中心线** |
 | 物理步长 | 0.004s (250Hz) | 0.004s (250Hz) |
 
 机架配置中使用 `PX4_GZ_WORLD=flat_terrain` 自动加载该世界。
 
+> **重要**：flat_terrain.sdf 的碰撞/摩擦/惯量参数与 default.sdf **完全一致**，仅扩大了视觉平面并添加了 `<spherical_coordinates>` 和跑道标记。这确保 GZ 物理引擎行为和传感器初始化与默认世界相同。
+>
 > **注意**：Gazebo 的 `<plane>` 几何体在碰撞检测中实际表现为无限平面，但视觉渲染尺寸决定了可见范围。将视觉尺寸设为 2000m 确保飞机在盘旋/着陆时始终能看到地面。
 
 ### 5.2 模型结构
@@ -782,6 +785,7 @@ MATLAB 开环模型                    PX4 + Gazebo 闭环仿真
 | 9 | 电池60秒耗尽 | SIM_BAT_DRAIN 默认值 | SIM_BAT_DRAIN=3600 | 6d09703 |
 | 10 | 电池故障保护中断飞行 | COM_LOW_BAT_ACT 触发 Hold/RTL | COM_LOW_BAT_ACT=0 | 本次提交 |
 | 11 | **着陆中止：No terrain measurement** | 无测距仪+FW_LND_USETER=1+FW_LND_ABORT=3 | FW_LND_USETER=0, FW_LND_ABORT=0 | 本次提交 |
+| 12 | **GPS/EKF/罗盘缺失（flat_terrain）** | flat_terrain.sdf 参数与 default 不一致 | 修复碰撞/摩擦参数+添加 spherical_coordinates | 本次提交 |
 
 #### 问题 #11 详细分析：着陆中止 "No terrain measurement result"
 
@@ -815,6 +819,56 @@ param set-default FW_LND_ABORT  0   # 禁用所有着陆中止条件
 ```
 
 **效果**：着陆改为使用航点海拔高度而非地形测量值，在平坦地形上完全可靠。
+
+#### 问题 #12 详细分析：GPS/EKF/罗盘缺失（使用 flat_terrain 世界时）
+
+**错误信息**（QGC 预飞检查失败）：
+```
+GPS not detected
+EKF not ready
+Compass missing
+```
+
+**根本原因**：flat_terrain.sdf 世界文件与 default.sdf 存在参数差异，可能导致：
+1. GZ 物理引擎初始化行为不同（碰撞面 2000×2000 vs 1×1、摩擦力 mu=100 vs 默认）
+2. GZ 启动速度变慢 → gz_bridge 的 EntityFactory 服务调用超时（1秒限制）
+3. gz_bridge 初始化失败 → 传感器模拟器（GPS/Mag/Baro）不会启动
+4. 缺少 `<spherical_coordinates>` 可能影响 GZ 地理参考系统
+
+**传感器数据链路**：
+```
+GZ 启动世界 → gz_bridge 连接 (/world/flat_terrain/create, 1秒超时)
+  ├─ 失败 → PX4_ERROR → 传感器模拟器不启动 → GPS/EKF/罗盘全部缺失
+  └─ 成功 → 订阅 clock/pose/imu/baro 话题
+       → sensor_gps_sim start    (依赖 groundtruth 位置)
+       → sensor_mag_sim start    (依赖 GPS 定位)
+       → sensor_airspeed_sim start
+```
+
+**解决方案**：
+1. **碰撞面大小**：改为 `<size>1 1</size>`（与 default.sdf 一致，平面碰撞无论如何都是无限的）
+2. **摩擦参数**：改为 `<ode/>`（与 default.sdf 一致）
+3. **添加 spherical_coordinates**：确保 GZ 地理参考系统正确初始化
+4. **保留 2000×2000 视觉平面**：满足固定翼大范围飞行的视觉需求
+
+**排查步骤**（如果仍然出现问题）：
+```bash
+# 1. 杀掉所有残留 GZ 进程（最常见原因！）
+pkill -f "gz sim"
+pkill -f "ruby.*gz"
+
+# 2. 清理构建缓存
+cd ~/PX4-Autopilot
+make clean
+
+# 3. 重新构建并启动
+make px4_sitl gz_chainwing
+
+# 4. 如果仍有问题，手动指定默认世界测试
+PX4_GZ_WORLD=default make px4_sitl gz_chainwing
+```
+
+> **⚠️ 最常见原因**：上一次仿真的 GZ 进程仍在运行（world name = "default"），但 gz_bridge 尝试连接 "flat_terrain" 世界。启动脚本会检测到已运行的 GZ 并跳过启动新世界，但世界名称不匹配导致所有传感器话题订阅失败。**解决方法：运行前先 `pkill -f "gz sim"`**。
 
 ### 10.2 已知问题（调试中）
 
@@ -944,7 +998,7 @@ make px4_sitl gz_chainwing
 | `ROMFS/px4fmu_common/init.d-posix/airframes/4007_gz_chainwing` | 241 | 机架配置 |
 | `Tools/simulation/gz/models/chainwing/model.sdf` | 968 | Gazebo 仿真模型 |
 | `Tools/simulation/gz/models/chainwing/model.config` | 12 | 模型元数据 |
-| `Tools/simulation/gz/worlds/flat_terrain.sdf` | 177 | 超大平地仿真世界 (2000×2000m) |
+| `Tools/simulation/gz/worlds/flat_terrain.sdf` | 188 | 超大平地仿真世界 (2000×2000m) + spherical_coordinates |
 | `CHAINWING_FIRMWARE_DOC.md` | 本文件 | 固件技术文档 |
 | `CHAINWING_CONTROL_FLOW.md` | ~1600 | 控制流程详解 |
 | `CHAINWING_TUNING_GUIDE.md` | ~800 | 调参指南 |

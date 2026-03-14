@@ -14,6 +14,19 @@
     <plugin name='gz::sim::systems::Sensors' filename='gz-sim-sensors-system'>
       <render_engine>ogre2</render_engine>
     </plugin>
+
+    <!-- Spherical coordinates: matches PX4 default SIM_GZ_HOME_LAT/LON/ALT
+         (Zurich, Switzerland). Required for proper geodetic reference frame
+         so that GZ and PX4 agree on the world origin for GPS/EKF. -->
+    <spherical_coordinates>
+      <surface_model>EARTH_WGS84</surface_model>
+      <world_frame_orientation>ENU</world_frame_orientation>
+      <latitude_deg>47.397742</latitude_deg>
+      <longitude_deg>8.545594</longitude_deg>
+      <elevation>488.0</elevation>
+      <heading_deg>0</heading_deg>
+    </spherical_coordinates>
+
     <gui fullscreen='false'>
       <plugin name='3D View' filename='GzScene3D'>
         <gz-gui>
@@ -76,9 +89,10 @@
       <shadows>true</shadows>
     </scene>
 
-    <!-- Super-large flat terrain: 2000m x 2000m ground plane
-         Provides ample area for fixed-wing takeoff, loiter, and landing.
-         Visual grid lines every 100m for spatial reference. -->
+    <!-- Flat terrain ground plane for fixed-wing testing.
+         Collision: 1x1 (SDF planes are infinite for collision regardless).
+         Visual: 2000x2000m to provide spatial reference for FW operations.
+         Friction/surface properties match default.sdf exactly. -->
     <model name='ground_plane'>
       <static>true</static>
       <link name='link'>
@@ -86,15 +100,12 @@
           <geometry>
             <plane>
               <normal>0 0 1</normal>
-              <size>2000 2000</size>
+              <size>1 1</size>
             </plane>
           </geometry>
           <surface>
             <friction>
-              <ode>
-                <mu>100</mu>
-                <mu2>50</mu2>
-              </ode>
+              <ode/>
             </friction>
             <bounce/>
             <contact/>
