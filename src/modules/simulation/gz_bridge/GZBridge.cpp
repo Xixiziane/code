@@ -68,47 +68,15 @@ GZBridge::~GZBridge()
 
 int GZBridge::init()
 {
-	// Time to wait after removing an existing model, allowing Gazebo to
-	// fully tear down sensors and transport topics before recreation.
-	static constexpr useconds_t MODEL_CLEANUP_DELAY_US = 2000000; // 2 seconds
-
 	if (!_model_sim.empty()) {
 
-		// Remove any existing model with the same name (handles PX4 restart
-		// while Gazebo is still running from a previous session)
-		{
-			gz::msgs::Entity remove_req{};
-			remove_req.set_name(_model_name);
-			remove_req.set_type(gz::msgs::Entity::MODEL);
-
-			gz::msgs::Boolean remove_rep;
-			bool remove_result;
-			std::string remove_service = "/world/" + _world_name + "/remove";
-
-			if (_node.Request(remove_service, remove_req, 1000, remove_rep, remove_result)) {
-				if (remove_rep.data() && remove_result) {
-					PX4_INFO("Removed existing model: %s", _model_name.c_str());
-
-					// Wait for Gazebo to fully clean up the old model's sensors
-					// and transport topics before creating a new one.  Without
-					// this delay, the new model's sensor topics can collide with
-					// stale data from the old model, causing EKF2 position
-					// innovation spikes ("position estimate error").
-					system_usleep(MODEL_CLEANUP_DELAY_US);
-				}
-
-			}
-
-			// Ignore failure: model may not exist on first run
-		}
-
-		// service call to create model
+		// Build the EntityFactory request for model creation
 		gz::msgs::EntityFactory req{};
 		req.set_sdf_filename(_model_sim + "/model.sdf");
 
 		req.set_name(_model_name); // New name for the entity, overrides the name on the SDF.
 
-		req.set_allow_renaming(false); // allowed to rename the entity in case of overlap with existing entities
+		req.set_allow_renaming(false); // disallow renaming to keep sensor topic names predictable
 
 		if (!_model_pose.empty()) {
 			PX4_INFO("Requested Model Position: %s", _model_pose.c_str());
@@ -150,8 +118,36 @@ int GZBridge::init()
 
 		if (_node.Request(create_service, req, 1000, rep, result)) {
 			if (!rep.data() || !result) {
-				PX4_ERR("EntityFactory service call failed");
-				return PX4_ERROR;
+				// Creation failed — likely because a model with the same name
+				// already exists (PX4 restarted while Gazebo was still running).
+				// Remove the stale model and retry.
+				PX4_WARN("Model creation failed, removing stale model and retrying: %s", _model_name.c_str());
+
+				gz::msgs::Entity remove_req{};
+				remove_req.set_name(_model_name);
+				remove_req.set_type(gz::msgs::Entity::MODEL);
+
+				gz::msgs::Boolean remove_rep;
+				bool remove_result;
+				std::string remove_service = "/world/" + _world_name + "/remove";
+
+				_node.Request(remove_service, remove_req, 1000, remove_rep, remove_result);
+
+				if (!remove_result) {
+					PX4_WARN("Model removal request failed for: %s", _model_name.c_str());
+				}
+
+				// Wait for Gazebo to fully clean up the old model's sensors
+				// and transport topics before creating a new one.
+				system_usleep(2000000); // 2 seconds
+
+				// Retry creation
+				if (!_node.Request(create_service, req, 1000, rep, result) || !rep.data() || !result) {
+					PX4_ERR("EntityFactory service call failed after retry");
+					return PX4_ERROR;
+				}
+
+				PX4_INFO("Successfully recreated model: %s", _model_name.c_str());
 			}
 
 		} else {

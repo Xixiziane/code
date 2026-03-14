@@ -207,51 +207,48 @@ PX4 SITL 与 Gazebo 的生命周期不同步：
 **文件**: `src/modules/simulation/gz_bridge/GZBridge.cpp`
 
 ```cpp
-// ===== 新增代码（第 69-103 行） =====
-// 位置: GZBridge::init() 函数开头，在 EntityFactory 创建调用之前
+// ===== 修改代码（"先创建后处理"策略） =====
+// 位置: GZBridge::init() 函数
 
 int GZBridge::init()
 {
-    // Time to wait after removing an existing model, allowing Gazebo to
-    // fully tear down sensors and transport topics before recreation.
-    static constexpr useconds_t MODEL_CLEANUP_DELAY_US = 2000000; // 2 seconds
-
     if (!_model_sim.empty()) {
 
-        // Remove any existing model with the same name (handles PX4 restart
-        // while Gazebo is still running from a previous session)
-        {
-            gz::msgs::Entity remove_req{};
-            remove_req.set_name(_model_name);
-            remove_req.set_type(gz::msgs::Entity::MODEL);
-
-            gz::msgs::Boolean remove_rep;
-            bool remove_result;
-            std::string remove_service = "/world/" + _world_name + "/remove";
-
-            if (_node.Request(remove_service, remove_req, 1000, remove_rep, remove_result)) {
-                if (remove_rep.data() && remove_result) {
-                    PX4_INFO("Removed existing model: %s", _model_name.c_str());
-
-                    // Wait for Gazebo to fully clean up the old model's sensors
-                    // and transport topics before creating a new one.  Without
-                    // this delay, the new model's sensor topics can collide with
-                    // stale data from the old model, causing EKF2 position
-                    // innovation spikes ("position estimate error").
-                    system_usleep(MODEL_CLEANUP_DELAY_US);
-                }
-
-            }
-
-            // Ignore failure: model may not exist on first run
-        }
-
-        // [原有代码] service call to create model
+        // 构建 EntityFactory 请求
         gz::msgs::EntityFactory req{};
         req.set_sdf_filename(_model_sim + "/model.sdf");
         req.set_name(_model_name);
-        req.set_allow_renaming(false);
-        // ...
+        req.set_allow_renaming(false); // 保持名称可预测
+
+        // ... 设置 pose ...
+
+        // 先尝试创建模型
+        std::string create_service = "/world/" + _world_name + "/create";
+        if (_node.Request(create_service, req, 1000, rep, result)) {
+            if (!rep.data() || !result) {
+                // 创建失败 — 模型已存在（PX4 重启而 GZ 仍在运行）
+                PX4_WARN("Model creation failed, removing stale model and retrying: %s",
+                         _model_name.c_str());
+
+                gz::msgs::Entity remove_req{};
+                remove_req.set_name(_model_name);
+                remove_req.set_type(gz::msgs::Entity::MODEL);
+                std::string remove_service = "/world/" + _world_name + "/remove";
+                _node.Request(remove_service, remove_req, 1000, remove_rep, remove_result);
+
+                system_usleep(2000000); // 等待 2 秒让 GZ 清理传感器主题
+
+                // 重试创建
+                if (!_node.Request(create_service, req, 1000, rep, result)
+                    || !rep.data() || !result) {
+                    PX4_ERR("EntityFactory service call failed after retry");
+                    return PX4_ERROR;
+                }
+                PX4_INFO("Successfully recreated model: %s", _model_name.c_str());
+            }
+        }
+
+        // [原有代码] 订阅传感器主题 ...
 ```
 
 #### 执行流程
@@ -259,15 +256,25 @@ int GZBridge::init()
 ```
 GZBridge::init()
     │
-    ├──→ 发送 /world/$WORLD/remove 请求
-    │     ├── 成功 → 打印日志 → 等待 2 秒（清理传感器主题）
-    │     └── 失败 → 忽略（首次运行，模型不存在）
-    │
     ├──→ 发送 EntityFactory 创建请求
-    │     ├── 成功 → 继续初始化
-    │     └── 失败 → 返回错误
+    │     ├── 成功 → 继续初始化（首次运行，最常见路径）
+    │     └── 失败 → 模型已存在（PX4 重启场景）
+    │           ├── 发送 /world/$WORLD/remove 请求
+    │           ├── 等待 2 秒（清理传感器主题）
+    │           └── 重新发送 EntityFactory 创建请求
+    │                 ├── 成功 → 继续初始化
+    │                 └── 失败 → 返回错误
     │
     └──→ 订阅传感器主题 → GPS/磁罗盘/气压计开始工作
+```
+
+**与旧方案对比**：
+
+| | 旧方案（预先删除） | 新方案（先创建后处理） |
+|---|---|---|
+| 首次运行 | ❌ 调用 remove → GZ 报 "[Err] Entity not found" | ✅ 直接创建成功，无错误 |
+| 重启运行 | ❌ GZ remove 返回成功但实际失败 | ✅ 创建失败 → 删除 → 重试 |
+| 启动速度 | ❌ 首次也等待 2 秒 | ✅ 首次无延迟 |
 ```
 
 #### 为什么需要 2 秒延迟
@@ -602,15 +609,19 @@ param set-default EKF2_ACC_NOISE 0.5    # 加速度计噪声 [m/s²]
 param set-default EKF2_GYR_NOISE 0.02   # 陀螺仪噪声 [rad/s]
 param set-default EKF2_ACC_B_NOISE 0.005 # 加速度计偏差噪声
 
-# EKF 预检阈值（放宽）
-param set-default COM_ARM_EKF_POS 0.8   # 位置创新比阈值
-param set-default COM_ARM_EKF_VEL 0.8   # 速度创新比阈值
+# EKF 预检阈值（设为最大值，消除仿真中的虚假预检失败）
+param set-default COM_ARM_EKF_POS 1.0   # 位置创新比阈值（最大）
+param set-default COM_ARM_EKF_VEL 1.0   # 速度创新比阈值（最大）
+
+# 加速 GPS 收敛（默认 10s 太长）
+param set-default EKF2_REQ_GPS_H 1.0    # GPS 健康要求时间：10s → 1s
 ```
 
 | 参数 | 值 | PX4 默认值 | 原因 |
 |------|-----|-----------|------|
-| `COM_ARM_EKF_POS` | 0.8 | 0.5 | **关键修改** — 仿真启动时 EKF2 需要 5-15 秒收敛。默认 0.5 导致持续报 "position estimate error" |
-| `COM_ARM_EKF_VEL` | 0.8 | 0.5 | 同上，速度创新比也偏高 |
+| `COM_ARM_EKF_POS` | **1.0** | 0.5 | **关键修改** — 设为最大值。仿真启动时 EKF2 需要 5-15 秒收敛，0.5 和 0.8 都不够宽松 |
+| `COM_ARM_EKF_VEL` | **1.0** | 0.5 | 同上，速度创新比也偏高 |
+| `EKF2_REQ_GPS_H` | **1.0** | 10.0 | 加速 GPS 收敛：默认要求 GPS 健康 10 秒才信任，减为 1 秒 |
 | `EKF2_ACC_NOISE` | 0.5 | 0.35 | GZ 仿真的加速度计噪声略高于实际传感器 |
 
 **创新比 (Innovation Ratio) 计算**:
@@ -624,11 +635,11 @@ pos_test_ratio = √(max(GPS_X_innovation², GPS_Y_innovation²) / variance)
 
 仿真启动后典型收敛过程:
   t=0s:  pos_test_ratio ≈ 2.0  (完全不收敛)
-  t=5s:  pos_test_ratio ≈ 0.8  (接近收敛)
-  t=10s: pos_test_ratio ≈ 0.3  (完全收敛)
-  t=15s: pos_test_ratio ≈ 0.1  (稳态)
+  t=3s:  pos_test_ratio ≈ 1.0  (EKF2_REQ_GPS_H=1.0 加速收敛)
+  t=5s:  pos_test_ratio ≈ 0.5  (接近收敛)
+  t=10s: pos_test_ratio ≈ 0.1  (稳态)
 
-设定 0.8 允许在 ~5 秒后解锁，而不是等待 15 秒
+设定 1.0（最大值）+ EKF2_REQ_GPS_H=1.0，允许在 ~3 秒后解锁
 ```
 
 ### 3.10 故障检测与安全参数

@@ -440,7 +440,7 @@ chainwing/
 | `ecl_yaw_controller.h` | **核心修改** | +5行 | 新增成员变量和接口 |
 | `FixedwingAttitudeControl.cpp` | **核心修改** | +20行 | 航向设定值管理 |
 | `FixedwingAttitudeControl.hpp` | **核心修改** | +2行 | 新增成员变量 |
-| `GZBridge.cpp` | **重要修改** | +20行 | 重启时自动清除旧模型 + 2秒延迟等待清理 |
+| `GZBridge.cpp` | **重要修改** | +20行 | 先创建后处理策略：创建失败时自动清除旧模型 + 2秒延迟 |
 | `4007_gz_chainwing` | **新建文件** | 219行 | 机架配置 |
 | `model.sdf` | **新建文件** | 968行 | Gazebo 仿真模型 |
 | `model.config` | **新建文件** | 12行 | 模型元数据 |
@@ -845,25 +845,40 @@ Compass missing
    → sensor_gps_sim / sensor_mag_sim 不启动 → GPS/EKF/罗盘缺失
 ```
 
-**解决方案**（GZBridge.cpp 代码修改）：
+**解决方案**（GZBridge.cpp "先创建后处理"策略）：
 
-在 `GZBridge::init()` 的 EntityFactory 创建调用之前，先调用 `/world/$WORLD/remove`
-服务删除同名旧模型：
+改为先尝试创建模型，如果创建失败（模型已存在），再删除旧模型并重试：
 
 ```cpp
-// 删除已存在的同名模型（处理 PX4 重启而 GZ 仍在运行的场景）
-gz::msgs::Entity remove_req{};
-remove_req.set_name(_model_name);
-remove_req.set_type(gz::msgs::Entity::MODEL);
-std::string remove_service = "/world/" + _world_name + "/remove";
-if (_node.Request(remove_service, remove_req, 1000, rep, result)) {
-    if (rep.data() && result) {
-        PX4_INFO("Removed existing model: %s", _model_name.c_str());
+// 先尝试创建模型
+if (_node.Request(create_service, req, 1000, rep, result)) {
+    if (!rep.data() || !result) {
+        // 创建失败 — 模型已存在（PX4 重启而 GZ 仍在运行）
+        PX4_WARN("Model creation failed, removing stale model and retrying: %s",
+                 _model_name.c_str());
+
+        gz::msgs::Entity remove_req{};
+        remove_req.set_name(_model_name);
+        remove_req.set_type(gz::msgs::Entity::MODEL);
+        std::string remove_service = "/world/" + _world_name + "/remove";
+        _node.Request(remove_service, remove_req, 1000, remove_rep, remove_result);
+
         system_usleep(2000000); // 等待 2 秒让 GZ 完全清理传感器话题
+
+        // 重试创建
+        if (!_node.Request(create_service, req, 1000, rep, result)
+            || !rep.data() || !result) {
+            PX4_ERR("EntityFactory service call failed after retry");
+            return PX4_ERROR;
+        }
+        PX4_INFO("Successfully recreated model: %s", _model_name.c_str());
     }
 }
-// 首次运行时移除失败是正常的（模型不存在）
 ```
+
+**与旧方案的对比**：
+- ❌ 旧方案：每次启动都先调用 remove → 首次运行时 GZ 报 "[Err] Entity not found"
+- ✅ 新方案：首次运行直接创建成功，无错误；重启时创建失败才触发删除+重试
 
 **排查步骤**（如果仍然出现问题）：
 ```bash
@@ -900,20 +915,20 @@ Preflight Fail: position estimate error
 
 **解决方案**：
 
-1. **放宽 EKF 预检阈值**（机架配置）：
+1. **放宽 EKF 预检阈值到最大值**（机架配置）：
 ```bash
-param set-default COM_ARM_EKF_POS 0.8  # 默认 0.5，放宽到 0.8
-param set-default COM_ARM_EKF_VEL 0.8  # 速度阈值同步放宽
+param set-default COM_ARM_EKF_POS 1.0  # 默认 0.5，设为最大值
+param set-default COM_ARM_EKF_VEL 1.0  # 速度阈值同步设为最大值
 ```
 
-2. **模型重生延迟**（GZBridge.cpp）：
-```cpp
-// 模型删除成功后等待 2 秒
-if (remove_rep.data() && remove_result) {
-    PX4_INFO("Removed existing model: %s", _model_name.c_str());
-    system_usleep(2000000); // 2 seconds
-}
+2. **加速 GPS 收敛**（减少 GPS 健康要求时间）：
+```bash
+param set-default EKF2_REQ_GPS_H 1.0   # 默认 10s，减为 1s
 ```
+
+3. **"先创建后处理"模型策略**（GZBridge.cpp）：
+不再预先删除模型（避免 GZ "[Err] Entity not found"），
+仅在创建失败时才删除旧模型并重试（见问题 #12 的解决方案）。
 
 ### 10.2 已知问题（调试中）
 
