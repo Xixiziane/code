@@ -84,6 +84,13 @@ int GZBridge::init()
 			if (_node.Request(remove_service, remove_req, 1000, remove_rep, remove_result)) {
 				if (remove_rep.data() && remove_result) {
 					PX4_INFO("Removed existing model: %s", _model_name.c_str());
+
+					// Wait for Gazebo to fully clean up the old model's sensors
+					// and transport topics before creating a new one.  Without
+					// this delay, the new model's sensor topics can collide with
+					// stale data from the old model, causing EKF2 position
+					// innovation spikes ("position estimate error").
+					system_usleep(2000000); // 2 seconds
 				}
 
 			}

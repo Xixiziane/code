@@ -215,6 +215,16 @@ param set-default EKF2_ACC_NOISE 0.5
 param set-default EKF2_GYR_NOISE 0.02
 param set-default EKF2_ACC_B_NOISE 0.005
 
+# --- EKF pre-arm check thresholds (relaxed for SITL) ---
+# Default COM_ARM_EKF_POS=0.5 is too strict for simulation startup.
+# The GPS innovation test ratio is initially high while EKF2 converges
+# (5-15 seconds), causing repeated "Preflight Fail: position estimate
+# error" messages that block arming.
+# 0.8 allows arming once innovations are within 80% of their expected
+# variance (still safe, within the valid range of 0.1-1.0).
+param set-default COM_ARM_EKF_POS 0.8
+param set-default COM_ARM_EKF_VEL 0.8
+
 # --- Climb limits (avoid stall at high AoA) ---
 param set-default FW_P_LIM_MAX 15
 

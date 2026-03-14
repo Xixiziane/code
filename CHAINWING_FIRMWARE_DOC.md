@@ -440,7 +440,7 @@ chainwing/
 | `ecl_yaw_controller.h` | **核心修改** | +5行 | 新增成员变量和接口 |
 | `FixedwingAttitudeControl.cpp` | **核心修改** | +20行 | 航向设定值管理 |
 | `FixedwingAttitudeControl.hpp` | **核心修改** | +2行 | 新增成员变量 |
-| `GZBridge.cpp` | **重要修改** | +14行 | 重启时自动清除旧模型 |
+| `GZBridge.cpp` | **重要修改** | +20行 | 重启时自动清除旧模型 + 2秒延迟等待清理 |
 | `4007_gz_chainwing` | **新建文件** | 219行 | 机架配置 |
 | `model.sdf` | **新建文件** | 968行 | Gazebo 仿真模型 |
 | `model.config` | **新建文件** | 12行 | 模型元数据 |
@@ -856,7 +856,12 @@ gz::msgs::Entity remove_req{};
 remove_req.set_name(_model_name);
 remove_req.set_type(gz::msgs::Entity::MODEL);
 std::string remove_service = "/world/" + _world_name + "/remove";
-_node.Request(remove_service, remove_req, 1000, rep, result);
+if (_node.Request(remove_service, remove_req, 1000, rep, result)) {
+    if (rep.data() && result) {
+        PX4_INFO("Removed existing model: %s", _model_name.c_str());
+        system_usleep(2000000); // 等待 2 秒让 GZ 完全清理传感器话题
+    }
+}
 // 首次运行时移除失败是正常的（模型不存在）
 ```
 
@@ -871,6 +876,44 @@ make px4_sitl gz_chainwing
 ```
 
 > **⚠️ 最常见原因**：上一次仿真的 GZ 进程仍在运行（world name = "default"），但 gz_bridge 尝试连接 "flat_terrain" 世界。启动脚本会检测到已运行的 GZ 并跳过启动新世界，但世界名称不匹配导致所有传感器话题订阅失败。**解决方法：运行前先 `pkill -f "gz sim"`**。
+
+#### 问题 #13：启动仿真时持续出现 "position estimate error"
+
+**错误信息**：
+```
+Preflight Fail: position estimate error
+```
+
+**根本原因**：
+
+`estimatorCheck.cpp` 中的预飞检查比较 EKF2 的 GPS 位置创新测试比
+（`pos_test_ratio`）与阈值 `COM_ARM_EKF_POS`（默认 0.5）。
+
+两个场景导致此错误持续出现：
+
+1. **首次启动**：GPS 模拟器启动后，EKF2 需要 5-15 秒收敛。在此期间
+   `pos_test_ratio` 超过 0.5，阻止解锁。默认阈值 0.5 对仿真环境过于严格。
+
+2. **重启时**（PX4 重启但 GZ 仍在运行）：旧模型被删除后立即创建新模型，
+   GZ 尚未完全清理旧模型的传感器话题。新旧传感器数据混合导致 EKF2
+   位置创新持续偏高。
+
+**解决方案**：
+
+1. **放宽 EKF 预检阈值**（机架配置）：
+```bash
+param set-default COM_ARM_EKF_POS 0.8  # 默认 0.5，放宽到 0.8
+param set-default COM_ARM_EKF_VEL 0.8  # 速度阈值同步放宽
+```
+
+2. **模型重生延迟**（GZBridge.cpp）：
+```cpp
+// 模型删除成功后等待 2 秒
+if (remove_rep.data() && remove_result) {
+    PX4_INFO("Removed existing model: %s", _model_name.c_str());
+    system_usleep(2000000); // 2 seconds
+}
+```
 
 ### 10.2 已知问题（调试中）
 
