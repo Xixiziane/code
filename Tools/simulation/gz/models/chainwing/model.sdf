@@ -18,9 +18,9 @@
     Motor 0 (ESC1): left unit pusher    - command/motor_speed motorNumber=0
     Motor 1 (ESC2): center unit pusher  - command/motor_speed motorNumber=1
     Motor 2 (ESC3): right unit pusher   - command/motor_speed motorNumber=2
-    Servo 0 (SV1):  left unit elevon    - servo_0 (right elevon type, reversed)
+    Servo 0 (SV1):  left unit elevon    - servo_0 (left elevon type)
     Servo 1 (SV2):  center elevator     - servo_1
-    Servo 2 (SV3):  right unit elevon   - servo_2 (left elevon type, reversed)
+    Servo 2 (SV3):  right unit elevon   - servo_2 (right elevon type)
 -->
 <sdf version='1.9'>
   <model name='chainwing'>
@@ -699,7 +699,7 @@
       </physics>
     </joint>
 
-    <!-- Servo 2: Right unit elevon (left elevon type - reversed for chain-wing) -->
+    <!-- Servo 2: Right unit elevon (right elevon type) -->
     <link name="right_elevon">
       <inertial>
         <mass>0.00000001</mass>

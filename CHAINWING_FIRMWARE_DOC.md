@@ -246,24 +246,23 @@ Motor0 (左)    Motor1 (中)    Motor2 (右)
 | **俯仰** | 全部升降面 (CS0, CS1, CS2) | 同向偏转产生俯仰力矩 |
 | **偏航** | 左/右电机 (Motor0, Motor2) | 差动推力产生偏航力矩 |
 
-### 4.2 反向升降副翼配置（创新点 1）
+### 4.2 升降副翼配置
 
-#### 问题
+#### 配置说明
 
-标准升降副翼配置中，左单元安装左类型升降副翼（Left Elevon）、右单元安装右类型升降副翼（Right Elevon）。但在链翼构型中，由于三个单元共享一个刚体模型，这种配置会导致横滚指令时两侧升降副翼产生同向力矩，无法有效控制横滚。
-
-#### 解决方案
-
-**反转升降副翼类型**：
-- 左单元 → 使用 **Right Elevon** (Type 6)
-- 右单元 → 使用 **Left Elevon** (Type 5)
+链翼构型的升降副翼沿用与 rc_cessna 副翼相同的标准配置：
+- 左单元 → 使用 **Left Elevon** (Type 5)，TRQ_R = -0.5
+- 右单元 → 使用 **Right Elevon** (Type 6)，TRQ_R = +0.5
 - 中间单元 → 使用 **Elevator** (Type 3)
+
+在 GZ LiftDrag 插件中，`control_joint_rad_to_cl = -0.3` 意味着正舵偏角降低升力系数。
+因此横滚效率符号必须与 rc_cessna 一致：左侧负、右侧正。
 
 ```
 横滚右指令时:
-  CS0 (左, Right Elevon): TRQ_R = +0.5  → 后缘上偏 → 左翼升力↓
-  CS2 (右, Left Elevon):  TRQ_R = -0.5  → 后缘下偏 → 右翼升力↑
-  → 产生向右的横滚力矩 ✓
+  CS0 (左, Left Elevon):  TRQ_R = -0.5  → servo_0 减小 → 左翼 Cl↑ → 左翼升力↑
+  CS2 (右, Right Elevon): TRQ_R = +0.5  → servo_2 增大 → 右翼 Cl↓ → 右翼升力↓
+  → 左翼上、右翼下 = 向右横滚 ✓
 
 俯仰下指令时:
   CS0: TRQ_P = +0.5  → 贡献俯仰
@@ -275,16 +274,16 @@ Motor0 (左)    Motor1 (中)    Motor2 (右)
 #### 配置代码
 
 ```bash
-# 4007_gz_chainwing (第 46-64 行)
-param set-default CA_SV_CS0_TYPE 6       # Left unit: Right Elevon (反向!)
-param set-default CA_SV_CS0_TRQ_R 0.5    # 横滚贡献: +0.5
+# 4007_gz_chainwing (第 46-68 行)
+param set-default CA_SV_CS0_TYPE 5       # Left unit: Left Elevon
+param set-default CA_SV_CS0_TRQ_R -0.5   # 横滚贡献: -0.5 (同 rc_cessna 左副翼)
 param set-default CA_SV_CS0_TRQ_P 0.5    # 俯仰贡献: +0.5
 
 param set-default CA_SV_CS1_TYPE 3       # Center unit: Elevator
 param set-default CA_SV_CS1_TRQ_P 1.0    # 纯俯仰控制
 
-param set-default CA_SV_CS2_TYPE 5       # Right unit: Left Elevon (反向!)
-param set-default CA_SV_CS2_TRQ_R -0.5   # 横滚贡献: -0.5
+param set-default CA_SV_CS2_TYPE 6       # Right unit: Right Elevon
+param set-default CA_SV_CS2_TRQ_R 0.5    # 横滚贡献: +0.5 (同 rc_cessna 右副翼)
 param set-default CA_SV_CS2_TRQ_P 0.5    # 俯仰贡献: +0.5
 ```
 
@@ -659,13 +658,13 @@ Tools/simulation/gz/models/chainwing/
 | CA_ROTOR1_PY | 0.0 | 中电机 Y 位置 (m) |
 | CA_ROTOR2_PY | 1.2 | 右电机 Y 位置 (m) |
 | CA_SV_CS_COUNT | 3 | 三舵面 |
-| CA_SV_CS0_TYPE | 6 (Right Elevon) | 左单元升降副翼 (反向) |
-| CA_SV_CS0_TRQ_R | 0.5 | 横滚效率 |
+| CA_SV_CS0_TYPE | 5 (Left Elevon) | 左单元升降副翼 |
+| CA_SV_CS0_TRQ_R | -0.5 | 横滚效率 |
 | CA_SV_CS0_TRQ_P | 0.5 | 俯仰效率 |
 | CA_SV_CS1_TYPE | 3 (Elevator) | 中间升降舵 |
 | CA_SV_CS1_TRQ_P | 1.0 | 俯仰效率 |
-| CA_SV_CS2_TYPE | 5 (Left Elevon) | 右单元升降副翼 (反向) |
-| CA_SV_CS2_TRQ_R | -0.5 | 横滚效率 |
+| CA_SV_CS2_TYPE | 6 (Right Elevon) | 右单元升降副翼 |
+| CA_SV_CS2_TRQ_R | 0.5 | 横滚效率 |
 | CA_SV_CS2_TRQ_P | 0.5 | 俯仰效率 |
 
 #### 7.1.2 空速参数
