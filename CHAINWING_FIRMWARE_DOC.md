@@ -886,7 +886,7 @@ Preflight Fail: position estimate error
 
 **根本原因**：
 
-`estimatorCheck.cpp` 中的预飞检查比较 EKF2 的 GPS 位置创新测试比
+`estimatorCheck.cpp` 中的预飞检查比较 EKF2 的 GPS 位置创新测试比值
 （`pos_test_ratio`）与阈值 `COM_ARM_EKF_POS`（默认 0.5）。
 
 两个场景导致此错误持续出现：

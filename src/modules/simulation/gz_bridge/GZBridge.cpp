@@ -68,6 +68,10 @@ GZBridge::~GZBridge()
 
 int GZBridge::init()
 {
+	// Time to wait after removing an existing model, allowing Gazebo to
+	// fully tear down sensors and transport topics before recreation.
+	static constexpr useconds_t MODEL_CLEANUP_DELAY_US = 2000000; // 2 seconds
+
 	if (!_model_sim.empty()) {
 
 		// Remove any existing model with the same name (handles PX4 restart
@@ -90,7 +94,7 @@ int GZBridge::init()
 					// this delay, the new model's sensor topics can collide with
 					// stale data from the old model, causing EKF2 position
 					// innovation spikes ("position estimate error").
-					system_usleep(2000000); // 2 seconds
+					system_usleep(MODEL_CLEANUP_DELAY_US);
 				}
 
 			}
