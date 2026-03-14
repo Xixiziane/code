@@ -944,7 +944,7 @@ make px4_sitl gz_chainwing
 | `ROMFS/px4fmu_common/init.d-posix/airframes/4007_gz_chainwing` | 241 | 机架配置 |
 | `Tools/simulation/gz/models/chainwing/model.sdf` | 968 | Gazebo 仿真模型 |
 | `Tools/simulation/gz/models/chainwing/model.config` | 12 | 模型元数据 |
-| `Tools/simulation/gz/worlds/flat_terrain.sdf` | 147 | 超大平地仿真世界 (2000×2000m) |
+| `Tools/simulation/gz/worlds/flat_terrain.sdf` | 177 | 超大平地仿真世界 (2000×2000m) |
 | `CHAINWING_FIRMWARE_DOC.md` | 本文件 | 固件技术文档 |
 | `CHAINWING_CONTROL_FLOW.md` | ~1600 | 控制流程详解 |
 | `CHAINWING_TUNING_GUIDE.md` | ~800 | 调参指南 |
