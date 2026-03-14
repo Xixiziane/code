@@ -53,6 +53,23 @@ SensorMagSim::~SensorMagSim()
 bool SensorMagSim::init()
 {
 	ScheduleOnInterval(20_ms); // 50 Hz
+
+	// Initialize with default magnetic field for PX4 SITL location (Zurich)
+	// so that magnetometer data is published immediately from the first cycle,
+	// without waiting for GPS global position to become available.
+	// This prevents "MAG #0 TIMEOUT" errors during the first few seconds
+	// while gz_bridge and GPS simulator are still initializing.
+	// Once GPS becomes valid (eph < 1000), the field is updated to the
+	// actual position's magnetic model values.
+	const double default_lat = 47.397742;
+	const double default_lon = 8.545594;
+	const float mag_declination = get_mag_declination_radians(default_lat, default_lon);
+	const float mag_inclination = get_mag_inclination_radians(default_lat, default_lon);
+	const float mag_strength = get_mag_strength_gauss(default_lat, default_lon);
+
+	_mag_earth_pred = Dcmf(Eulerf(0, -mag_inclination, mag_declination)) * Vector3f(mag_strength, 0, 0);
+	_mag_earth_available = true;
+
 	return true;
 }
 

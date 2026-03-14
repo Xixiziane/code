@@ -243,6 +243,10 @@ param set-default FW_R_LIM 35
 # Default SIM_BAT_DRAIN=60 means battery drains in 60 seconds!
 # Set to 3600 (1 hour) to prevent "Battery unhealthy" during testing.
 param set-default SIM_BAT_DRAIN 3600
+# SIM_BAT_MIN_PCT: clamp battery to 50% minimum (never drains lower).
+# Prevents battery warnings even during very long simulation sessions.
+# Default is 50.0 but set explicitly for clarity.
+param set-default SIM_BAT_MIN_PCT 50.0
 
 # --- Battery failsafe action: warning only (no Hold/RTL/Land) ---
 # Default COM_LOW_BAT_ACT triggers failsafe (Hold 5s → RTL → Land).
