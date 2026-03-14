@@ -212,6 +212,12 @@ param set-default FW_R_LIM 35
 # Set to 3600 (1 hour) to prevent "Battery unhealthy" during testing.
 param set-default SIM_BAT_DRAIN 3600
 
+# --- Battery failsafe action: warning only (no Hold/RTL/Land) ---
+# Default COM_LOW_BAT_ACT triggers failsafe (Hold 5s → RTL → Land).
+# For SITL testing, disable the action to allow uninterrupted flight.
+# The battery warning tone still plays, but no mode change occurs.
+param set-default COM_LOW_BAT_ACT 0
+
 # --- Power supply check: circuit breaker for SITL ---
 # After a simulated crash, battery_simulator may report unhealthy state.
 # This circuit breaker allows re-arming without power supply checks.
