@@ -541,7 +541,15 @@ transition_result_t Commander::arm(arm_disarm_reason_t calling_reason, bool run_
 
 	if (run_preflight_checks && !_arm_state_machine.isArmed()) {
 		if (_vehicle_control_mode.flag_control_manual_enabled) {
-			if (_vehicle_control_mode.flag_control_climb_rate_enabled &&
+			// Throttle position checks only apply for RC-based arming (stick/switch/button).
+			// MAVLink command arming (QGC arm button, commander arm) is an explicit operator
+			// action that bypasses these checks, allowing arming with QGC virtual joystick
+			// where the throttle springs back to center on release.
+			const bool is_rc_arming = (calling_reason == arm_disarm_reason_t::rc_stick
+						   || calling_reason == arm_disarm_reason_t::rc_switch
+						   || calling_reason == arm_disarm_reason_t::rc_button);
+
+			if (is_rc_arming && _vehicle_control_mode.flag_control_climb_rate_enabled &&
 			    !_failsafe_flags.manual_control_signal_lost && _is_throttle_above_center) {
 				mavlink_log_critical(&_mavlink_log_pub, "Arming denied: throttle above center\t");
 				events::send(events::ID("commander_arm_denied_throttle_center"),
@@ -551,7 +559,7 @@ transition_result_t Commander::arm(arm_disarm_reason_t calling_reason, bool run_
 				return TRANSITION_DENIED;
 			}
 
-			if (!_vehicle_control_mode.flag_control_climb_rate_enabled &&
+			if (is_rc_arming && !_vehicle_control_mode.flag_control_climb_rate_enabled &&
 			    !_failsafe_flags.manual_control_signal_lost && !_is_throttle_low
 			    && _vehicle_status.vehicle_type != vehicle_status_s::VEHICLE_TYPE_ROVER) {
 				mavlink_log_critical(&_mavlink_log_pub, "Arming denied: high throttle\t");
