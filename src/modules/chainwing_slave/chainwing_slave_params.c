@@ -60,7 +60,6 @@ PARAM_DEFINE_INT32(CW_SLV_EN, 0);
  *
  * delta_trim = Kp * theta_hinge + Kd * d(theta_hinge)/dt
  *
- * @unit 1/rad
  * @min 0.0
  * @max 5.0
  * @decimal 2
