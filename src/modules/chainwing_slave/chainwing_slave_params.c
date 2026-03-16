@@ -77,7 +77,6 @@ PARAM_DEFINE_FLOAT(CW_SLV_KP, 0.3f);
  *
  * delta_trim = Kp * theta_hinge + Kd * d(theta_hinge)/dt
  *
- * @unit s/rad
  * @min 0.0
  * @max 2.0
  * @decimal 3
