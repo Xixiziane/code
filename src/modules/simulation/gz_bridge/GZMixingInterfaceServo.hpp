@@ -35,6 +35,9 @@
 
 #include <lib/mixer_module/mixer_module.hpp>
 
+#include <uORB/Subscription.hpp>
+#include <uORB/topics/chainwing_hinge_status.h>
+
 #include <gz/transport.hh>
 
 // GZBridge mixing class for Servos.
@@ -73,4 +76,7 @@ private:
 	MixingOutput _mixing_output{"SIM_GZ_SV", MAX_ACTUATORS, *this, MixingOutput::SchedulingPolicy::Auto, false, false};
 
 	std::vector<gz::transport::Node::Publisher> _servos_pub;
+
+	// Chain-wing slave hinge trim correction subscription
+	uORB::Subscription _hinge_status_sub{ORB_ID(chainwing_hinge_status)};
 };

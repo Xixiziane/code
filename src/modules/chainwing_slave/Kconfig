@@ -1,0 +1,5 @@
+menuconfig MODULES_CHAINWING_SLAVE
+	bool "chainwing_slave"
+	default n
+	---help---
+		Enable support for chain-wing slave controller

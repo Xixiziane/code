@@ -59,6 +59,15 @@ bool GZMixingInterfaceServo::updateOutputs(bool stop_motors, uint16_t outputs[MA
 	bool updated = false;
 	// cmd.command_value = (float)outputs[i] / 500.f - 1.f; // [-1, 1]
 
+	// Read chain-wing hinge trim correction if available
+	chainwing_hinge_status_s hinge_status{};
+	bool hinge_valid = false;
+
+	if (_hinge_status_sub.updated()) {
+		_hinge_status_sub.copy(&hinge_status);
+		hinge_valid = hinge_status.data_valid;
+	}
+
 	int i = 0;
 
 	for (auto &servo_pub : _servos_pub) {
@@ -66,8 +75,21 @@ bool GZMixingInterfaceServo::updateOutputs(bool stop_motors, uint16_t outputs[MA
 			gz::msgs::Double servo_output;
 			///TODO: Normalize output data
 			double output = (outputs[i] - 500) / 500.0;
-			// std::cout << "outputs[" << i << "]: " << outputs[i] << std::endl;
-			// std::cout << "  output: " << output << std::endl;
+
+			// Apply chain-wing slave hinge trim correction
+			// servo_0 = left slave elevon, servo_2 = right slave elevon
+			if (hinge_valid) {
+				if (i == 0) {
+					output += (double)hinge_status.trim_left;
+				} else if (i == 2) {
+					output += (double)hinge_status.trim_right;
+				}
+
+				// Clamp to valid range after adding trim
+				if (output > 1.0) { output = 1.0; }
+				if (output < -1.0) { output = -1.0; }
+			}
+
 			servo_output.set_data(output);
 
 			if (servo_pub.Valid()) {

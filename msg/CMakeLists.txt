@@ -55,6 +55,7 @@ set(msg_files
 	CameraCapture.msg
 	CameraStatus.msg
 	CameraTrigger.msg
+	ChainwingHingeStatus.msg
 	CellularStatus.msg
 	CollisionConstraints.msg
 	CollisionReport.msg

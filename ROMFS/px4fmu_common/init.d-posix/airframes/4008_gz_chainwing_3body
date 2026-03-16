@@ -1,0 +1,211 @@
+#!/bin/sh
+#
+# @name Gazebo Chain-Wing UAV 3-body (slave controller)
+# @type Fixedwing
+#
+# Three fixed-wing units as separate rigid bodies linked at wingtips
+# by high-stiffness revolute hinge joints. Includes chainwing_slave
+# module for elevator-based coplanar position trim.
+#
+# Based on 4007_gz_chainwing with these additions:
+# - Uses chainwing_3body GZ model (3 separate bodies + hinge joints)
+# - Starts chainwing_slave module for hinge angle estimation and trim
+# - Slave PD controller: Kp=0.3, Kd=0.05, max_trim=0.3
+#
+
+. ${R}etc/init.d/rc.fw_defaults
+
+PX4_SIMULATOR=${PX4_SIMULATOR:=gz}
+PX4_GZ_WORLD=${PX4_GZ_WORLD:=flat_terrain}
+PX4_SIM_MODEL=${PX4_SIM_MODEL:=chainwing_3body}
+
+param set-default SIM_GZ_EN 1
+
+param set-default SENS_EN_GPSSIM 1
+param set-default SENS_EN_BAROSIM 0
+param set-default SENS_EN_MAGSIM 1
+param set-default SENS_EN_ARSPDSIM 1
+
+# --- Airframe type ---
+param set-default CA_AIRFRAME 1
+
+# --- Three motors for differential thrust yaw control ---
+param set-default CA_ROTOR_COUNT 3
+
+# Motor 0: left unit (Y = -1.2m)
+param set-default CA_ROTOR0_PX 0.0
+param set-default CA_ROTOR0_PY -1.2
+param set-default CA_ROTOR0_PZ 0.0
+
+# Motor 1: center unit (Y = 0.0m)
+param set-default CA_ROTOR1_PX 0.0
+param set-default CA_ROTOR1_PY 0.0
+param set-default CA_ROTOR1_PZ 0.0
+
+# Motor 2: right unit (Y = 1.2m)
+param set-default CA_ROTOR2_PX 0.0
+param set-default CA_ROTOR2_PY 1.2
+param set-default CA_ROTOR2_PZ 0.0
+
+# --- Three control surfaces ---
+param set-default CA_SV_CS_COUNT 3
+
+# CS0: Left unit - Right Elevon (reversed for chain-wing)
+param set-default CA_SV_CS0_TYPE 6
+param set-default CA_SV_CS0_TRQ_R 0.5
+param set-default CA_SV_CS0_TRQ_P 0.5
+param set-default CA_SV_CS0_TRQ_Y 0.0
+
+# CS1: Center unit - Elevator
+param set-default CA_SV_CS1_TYPE 3
+param set-default CA_SV_CS1_TRQ_R 0.0
+param set-default CA_SV_CS1_TRQ_P 1.0
+param set-default CA_SV_CS1_TRQ_Y 0.0
+
+# CS2: Right unit - Left Elevon (reversed for chain-wing)
+param set-default CA_SV_CS2_TYPE 5
+param set-default CA_SV_CS2_TRQ_R -0.5
+param set-default CA_SV_CS2_TRQ_P 0.5
+param set-default CA_SV_CS2_TRQ_Y 0.0
+
+# --- Airspeed parameters (from MATLAB: V0=20m/s cruise) ---
+param set-default FW_AIRSPD_MIN 15
+param set-default FW_AIRSPD_TRIM 20
+param set-default FW_AIRSPD_MAX 30
+param set-default FW_AIRSPD_STALL 8
+
+# --- Attitude control tuning ---
+param set-default FW_R_TC 0.5
+param set-default FW_P_TC 0.5
+param set-default FW_R_RMAX 30.0
+param set-default FW_P_RMAX_POS 25.0
+param set-default FW_P_RMAX_NEG 25.0
+param set-default FW_Y_RMAX 15.0
+
+# --- Rate controller gains ---
+param set-default FW_PR_P 0.9
+param set-default FW_PR_FF 0.5
+param set-default FW_PR_I 0.5
+
+param set-default FW_RR_FF 0.5
+param set-default FW_RR_P 0.3
+param set-default FW_RR_I 0.5
+
+param set-default FW_YR_FF 0.5
+param set-default FW_YR_P 0.6
+param set-default FW_YR_I 0.5
+
+# --- Yaw heading hold ---
+param set-default FW_YAW_STAB_SC 1.0
+
+# --- Pitch offset ---
+param set-default FW_PSP_OFF 2.0
+param set-default TRIM_PITCH -0.15
+
+# --- Throttle ---
+param set-default FW_THR_MAX 1.0
+param set-default FW_THR_MIN 0.05
+param set-default FW_THR_TRIM 0.60
+
+# --- Wheel control ---
+param set-default FW_W_EN 1
+
+# --- Performance ---
+param set-default FW_T_CLMB_MAX 8
+param set-default FW_T_SINK_MAX 3.0
+param set-default FW_T_SINK_MIN 2.5
+param set-default FW_P_LIM_MIN -15
+param set-default FW_LND_ANG 8
+
+# --- Landing ---
+param set-default FW_LND_AIRSPD 16
+param set-default FW_LND_FL_PMIN 3
+param set-default FW_LND_FL_PMAX 10
+param set-default FW_LND_FLALT 5
+param set-default FW_LND_USETER 0
+param set-default FW_LND_ABORT 0
+
+# --- Mission ---
+param set-default MIS_TAKEOFF_ALT 15
+param set-default NAV_ACC_RAD 20
+param set-default NAV_LOITER_RAD 50
+param set-default NAV_DLL_ACT 0
+param set-default NPFG_PERIOD 12
+
+# --- RTL ---
+param set-default RTL_RETURN_ALT 30
+param set-default RTL_DESCEND_ALT 15
+param set-default RTL_LAND_DELAY 0
+
+# --- Dataman: RAM mode ---
+param set-default SYS_DM_BACKEND 1
+
+# --- Takeoff ---
+param set-default RWTO_TKOFF 1
+
+# --- Collision Prevention ---
+param set-default CP_DIST -1
+
+# --- Failure Detector ---
+param set-default FD_ESCS_EN 0
+
+# --- RC Input ---
+param set-default COM_RC_IN_MODE 3
+
+# --- Prearm ---
+param set-default COM_PREARM_MODE 2
+
+# --- GZ ESC function mapping ---
+param set-default SIM_GZ_EC_FUNC1 101
+param set-default SIM_GZ_EC_MIN1 0
+param set-default SIM_GZ_EC_MAX1 1000
+
+param set-default SIM_GZ_EC_FUNC2 102
+param set-default SIM_GZ_EC_MIN2 0
+param set-default SIM_GZ_EC_MAX2 1000
+
+param set-default SIM_GZ_EC_FUNC3 103
+param set-default SIM_GZ_EC_MIN3 0
+param set-default SIM_GZ_EC_MAX3 1000
+
+# --- GZ Servo function mapping ---
+param set-default SIM_GZ_SV_FUNC1 201
+param set-default SIM_GZ_SV_FUNC2 202
+param set-default SIM_GZ_SV_FUNC3 203
+
+# --- EKF2 tuning ---
+param set-default EKF2_ACC_NOISE 0.5
+param set-default EKF2_GYR_NOISE 0.02
+param set-default EKF2_ACC_B_NOISE 0.005
+param set-default COM_ARM_EKF_POS 1.0
+param set-default COM_ARM_EKF_VEL 1.0
+param set-default EKF2_REQ_GPS_H 1.0
+
+# --- Climb limits ---
+param set-default FW_P_LIM_MAX 15
+param set-default FW_R_LIM 35
+
+# --- Battery simulator ---
+param set-default SIM_BAT_DRAIN 3600
+param set-default SIM_BAT_MIN_PCT 50.0
+param set-default COM_LOW_BAT_ACT 0
+param set-default CBRK_SUPPLY_CHK 894281
+
+# ==============================================================
+# Chain-Wing Slave Controller (3-body specific)
+# ==============================================================
+
+# Enable slave controller for hinge position trim
+param set-default CW_SLV_EN 1
+
+# PD controller gains for hinge correction
+# Kp=0.3: moderate response to 5° hinge deflection → 2.6% trim
+# Kd=0.05: light damping to prevent oscillation
+param set-default CW_SLV_KP 0.3
+param set-default CW_SLV_KD 0.05
+
+# Max trim = 30% travel, provides 24.6 N·m correction moment
+param set-default CW_SLV_TRIM_MAX 0.3
+
+# Rate filter at 10 Hz (2× servo bandwidth = 5 Hz)
+param set-default CW_SLV_LP_FREQ 10.0
