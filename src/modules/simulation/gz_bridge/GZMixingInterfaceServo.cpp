@@ -61,12 +61,7 @@ bool GZMixingInterfaceServo::updateOutputs(bool stop_motors, uint16_t outputs[MA
 
 	// Read chain-wing hinge trim correction if available
 	chainwing_hinge_status_s hinge_status{};
-	bool hinge_valid = false;
-
-	if (_hinge_status_sub.updated()) {
-		_hinge_status_sub.copy(&hinge_status);
-		hinge_valid = hinge_status.data_valid;
-	}
+	bool hinge_valid = _hinge_status_sub.copy(&hinge_status) && hinge_status.data_valid;
 
 	int i = 0;
 

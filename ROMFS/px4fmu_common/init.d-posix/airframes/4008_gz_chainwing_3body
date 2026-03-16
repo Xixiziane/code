@@ -199,7 +199,7 @@ param set-default CBRK_SUPPLY_CHK 894281
 param set-default CW_SLV_EN 1
 
 # PD controller gains for hinge correction
-# Kp=0.3: moderate response to 5° hinge deflection → 2.6% trim
+# Kp=0.3: at 5 deg deflection, trim = Kp * (5*pi/180) = 0.026 (2.6%)
 # Kd=0.05: light damping to prevent oscillation
 param set-default CW_SLV_KP 0.3
 param set-default CW_SLV_KD 0.05

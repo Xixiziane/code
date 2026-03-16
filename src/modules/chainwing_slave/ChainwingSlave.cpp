@@ -98,6 +98,7 @@ void ChainwingSlave::Run()
 		return;
 	}
 
+	// Calculate dt, constrained to [1ms, 100ms] to handle timing edge cases
 	const float dt = math::constrain((now - _last_run) * 1e-6f, 0.001f, 0.1f);
 	_last_run = now;
 
@@ -134,9 +135,9 @@ void ChainwingSlave::updateHingeEstimate(float dt)
 	vehicle_attitude_s attitude{};
 	bool attitude_valid = _vehicle_attitude_sub.copy(&attitude);
 
-	// Extract roll rate (X-axis in body frame) — this is the hinge rotation axis
-	// For the chain-wing, relative pitch between units manifests as differential
-	// roll rate in the body frame when viewed from the hinge axis perspective.
+	// Extract roll rate (X-axis in body frame).
+	// The hinge axis is aligned with X (forward direction), so relative pitch
+	// rotation between units around the hinge is sensed as roll rate by the IMU.
 	const float roll_rate = angular_vel.xyz[0];
 
 	// Initialize reference on first valid attitude
@@ -169,11 +170,14 @@ void ChainwingSlave::updateHingeEstimate(float dt)
 
 	// Update hinge rates with low-pass filter
 	_hinge_rate_left = (1.0f - alpha) * _hinge_rate_left + alpha * roll_rate;
+	// Right hinge uses negated roll rate: positive roll rate (left wing up)
+	// corresponds to negative hinge deflection for the right slave unit.
 	_hinge_rate_right = (1.0f - alpha) * _hinge_rate_right + alpha * (-roll_rate);
 
-	// Integrate angle with decay factor (complementary filter)
-	// τ_decay prevents unbounded drift from integration errors
-	const float tau_decay = 2.0f; // seconds (how fast integrated angle decays to zero)
+	// Integrate angle with decay factor (complementary filter).
+	// tau_decay prevents unbounded drift from integration errors.
+	// At tau=2s, integrated angle decays to 37% after 2s without new input.
+	const float tau_decay = 2.0f; // seconds
 	const float decay = expf(-dt / tau_decay);
 
 	_hinge_angle_left = decay * (_hinge_angle_left + _hinge_rate_left * dt);

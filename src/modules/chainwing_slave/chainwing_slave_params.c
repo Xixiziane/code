@@ -58,7 +58,7 @@ PARAM_DEFINE_INT32(CW_SLV_EN, 0);
  * Controls how aggressively the slave corrects hinge deflection.
  * Higher values give faster response but may cause oscillation.
  *
- * δ_trim = Kp × θ_hinge + Kd × θ̇_hinge
+ * delta_trim = Kp * theta_hinge + Kd * d(theta_hinge)/dt
  *
  * @unit 1/rad
  * @min 0.0
@@ -75,7 +75,7 @@ PARAM_DEFINE_FLOAT(CW_SLV_KP, 0.3f);
  * Derivative gain for the hinge angle PD controller.
  * Damps hinge oscillation. Higher values add more damping.
  *
- * δ_trim = Kp × θ_hinge + Kd × θ̇_hinge
+ * delta_trim = Kp * theta_hinge + Kd * d(theta_hinge)/dt
  *
  * @unit s/rad
  * @min 0.0
