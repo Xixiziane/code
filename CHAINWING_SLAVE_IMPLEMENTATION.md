@@ -2,7 +2,7 @@
 
 ## CHAINWING_SLAVE_IMPLEMENTATION.md
 
-> **版本**: v1.1  
+> **版本**: v1.2  
 > **日期**: 2024  
 > **基于仓库**: PX4_test (Chainwing UAV firmware)  
 > **关联文档**: CHAINWING_MULTI_CONTROLLER_GUIDE.md, CHAINWING_FIRMWARE_DOC.md, CHAINWING_TECHNICAL_DETAILS.md
@@ -23,6 +23,8 @@
 10. [仿真使用指南](#10-仿真使用指南)
 11. [文件清单](#11-文件清单)
 12. [代码验证完整步骤](#12-代码验证完整步骤)
+13. [当前主从机飞控架构现状分析](#13-当前主从机飞控架构现状分析)
+14. [3body仿真完成后的下一步工作](#14-3body仿真完成后的下一步工作)
 
 ---
 
@@ -1138,6 +1140,410 @@ logger off
 | 8 | 编译 `-Werror=maybe-uninitialized` | 变量未初始化 | 确保所有可能未赋值的变量有初始值（如 `bool result = false;`） |
 | 9 | `MAG #0 TIMEOUT` 仿真启动时 | sensor_mag_sim 等待 GPS | 已在 SensorMagSim::init() 中修复（默认磁场初始化），确保使用最新代码 |
 | 10 | `Preflight Fail: position estimate error` | EKF 收敛慢 | 已设置 `COM_ARM_EKF_POS=1.0, EKF2_REQ_GPS_H=1.0`，等待 5-10s |
+
+---
+
+## 13. 当前主从机飞控架构现状分析
+
+> **核心问题**：就目前仓库代码而言，主机和从机的飞控分别是什么？
+
+### 13.1 总体架构图
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│              当前仓库代码中的飞控架构（单实例仿真）                │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ┌─── 单个 PX4 SITL 进程 ──────────────────────────────────┐   │
+│  │                                                          │   │
+│  │  ┌────────────────────────────────┐   (标准 PX4 模块)   │   │
+│  │  │ 主机飞控 = 标准 PX4 固定翼模块  │                     │   │
+│  │  │ ├─ fw_att_control（姿态控制）   │                     │   │
+│  │  │ ├─ fw_rate_control（角速率控制）│                     │   │
+│  │  │ ├─ fw_pos_control（位置控制）   │                     │   │
+│  │  │ ├─ control_allocator（控制分配）│                     │   │
+│  │  │ ├─ navigator（导航/任务执行）   │                     │   │
+│  │  │ ├─ ekf2（状态估计）             │                     │   │
+│  │  │ └─ commander（飞行状态管理）    │                     │   │
+│  │  └────────────────────────────────┘                     │   │
+│  │            ↓  产生 servo 指令                            │   │
+│  │  ┌────────────────────────────────┐   (新增模块)        │   │
+│  │  │ 从机飞控 = chainwing_slave     │                     │   │
+│  │  │ ├─ IMU 积分估算铰链角度         │                     │   │
+│  │  │ ├─ PD 控制器计算修正量          │                     │   │
+│  │  │ └─ 发布 ChainwingHingeStatus   │                     │   │
+│  │  └────────────────────────────────┘                     │   │
+│  │            ↓  修正量叠加到 servo 输出                    │   │
+│  │  ┌────────────────────────────────┐                     │   │
+│  │  │ GZMixingInterfaceServo         │                     │   │
+│  │  │ servo_0 = 主机指令 + trim_left │   ← 左从机修正      │   │
+│  │  │ servo_1 = 主机指令             │   ← 主机升降舵       │   │
+│  │  │ servo_2 = 主机指令 + trim_right│   ← 右从机修正      │   │
+│  │  └────────────────────────────────┘                     │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│            ↓                                                     │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │  Gazebo 三体模型 (chainwing_3body)                       │   │
+│  │  base_link(主机) ←铰链→ left_unit(左从) + right_unit(右从)│   │
+│  └──────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 13.2 主机飞控详解
+
+**主机飞控 = PX4 标准固定翼控制栈**，不是一个单独的模块，而是由多个标准 PX4 模块组合实现：
+
+| 模块 | 文件位置 | 主机角色 |
+|------|----------|----------|
+| `fw_att_control` | `src/modules/fw_att_control/` | 姿态控制器 — 计算全机的 roll/pitch/yaw 控制力矩 |
+| `fw_rate_control` | `src/modules/fw_rate_control/` | 角速率内环 — 产生 roll_rate/pitch_rate/yaw_rate 指令 |
+| `fw_pos_control` | `src/modules/fw_pos_control/` | 位置/高度控制 — TECS + NPFG 算法 |
+| `control_allocator` | `src/modules/control_allocator/` | 控制分配 — 将力矩分配到 3 电机 + 3 舵面 |
+| `navigator` | `src/modules/navigator/` | 任务执行 — 航线跟踪、RTL、着陆 |
+| `ekf2` | `src/modules/ekf2/` | 状态估计 — GPS+IMU+磁力计+气压计融合 |
+| `commander` | `src/modules/commander/` | 飞行状态机 — 解锁、模式切换、故障检测 |
+
+**主机的输出**（通过 `control_allocator`）：
+- **3个电机**：`motor_0`（左）、`motor_1`（中）、`motor_2`（右）→ 差动推力偏航控制
+- **3个舵面**：`servo_0`（左elevon）、`servo_1`（中升降舵）、`servo_2`（右elevon）
+
+**主机的配置来源**：
+- SITL 仿真：`4007_gz_chainwing` 或 `4008_gz_chainwing_3body` 机架文件
+- SIH 仿真：`1103_chainwing_sih.hil`
+- 硬件部署：`2150_chainwing`
+
+### 13.3 从机飞控详解
+
+**从机飞控 = `chainwing_slave` 模块**，这是一个新增的 PX4 模块：
+
+| 属性 | 详情 |
+|------|------|
+| 模块名 | `chainwing_slave` |
+| 文件位置 | `src/modules/chainwing_slave/` |
+| 主类 | `ChainwingSlave` (继承 `ModuleBase` + `ScheduledWorkItem`) |
+| 运行频率 | 50 Hz (`ScheduleOnInterval(20000_us)`) |
+| 工作队列 | `px4::wq_configurations::lp_default` |
+| 输入 | `vehicle_angular_velocity` + `vehicle_attitude` (来自 IMU) |
+| 输出 | `chainwing_hinge_status` (包含 trim_left, trim_right) |
+| 启用参数 | `CW_SLV_EN = 1` |
+
+**从机的控制逻辑**：
+```
+1. 读取 IMU 角速度 → 低通滤波（10Hz）
+2. 积分估算铰链角度 θ_hinge（带衰减 τ=2s 防漂移）
+3. 互补滤波：融合姿态角修正长期漂移（α=0.02）
+4. PD 控制律：δ_trim = Kp × θ + Kd × θ̇
+5. 限幅：|δ_trim| ≤ 0.3（30% 舵面行程）
+6. 发布 ChainwingHingeStatus → GZMixingInterfaceServo 叠加到 servo 输出
+```
+
+**从机不做的事情**（由主机代劳）：
+- 不做导航、任务规划
+- 不做姿态外环控制
+- 不做油门管理
+- 不做模式切换
+
+### 13.4 主从关系对比表
+
+| 维度 | 主机（Master） | 从机（Slave） |
+|------|---------------|---------------|
+| **飞控软件** | PX4 标准固定翼控制栈（fw_att_control + fw_rate_control + fw_pos_control + control_allocator + navigator + ekf2） | chainwing_slave 模块（50Hz PD 控制器） |
+| **控制目标** | 全机姿态、高度、航线跟踪 | 仅维持铰链角度 ≈ 0（共面性） |
+| **执行器** | 3 电机 + 3 舵面（完整控制权） | 仅修正 servo_0 和 servo_2 的 elevon 偏移量 |
+| **传感器** | GPS + IMU + 磁力计 + 气压计 + 空速管 | 仅用 IMU（角速度 + 姿态） |
+| **输出信号** | roll/pitch/yaw 力矩 → 电机和舵面指令 | δ_trim（叠加到主机 servo 指令上） |
+| **配置文件** | 4007/4008 机架文件（~210 行参数） | 5 个 CW_SLV_* 参数 |
+| **代码量** | ~30,000 行（PX4 固定翼模块总计） | ~250 行（ChainwingSlave.cpp） |
+| **运行方式** | 独立决策，控制整个链翼飞行 | 依附于主机，只做微调 |
+
+### 13.5 当前架构的关键特征
+
+**特征 1：单实例架构（仿真模式）**
+
+当前代码是**单 PX4 实例**控制三体 GZ 模型。主机和从机的逻辑都运行在同一个 PX4 进程中：
+- 主机 = 标准 PX4 控制栈（自动运行）
+- 从机 = chainwing_slave 模块（手动启动或机架脚本启动）
+
+这与最终的硬件部署架构不同。硬件上需要 3 个独立的 PX4 飞控，通过 UART+MAVLink 通信。
+
+**特征 2：从机是"寄生"式控制**
+
+从机不独立产生 servo 指令，而是在主机指令基础上**叠加修正量**：
+```
+δ_total = clamp(δ_master + δ_trim, -1.0, 1.0)
+```
+这在 `GZMixingInterfaceServo::updateOutputs()` 中实现（第 75-88 行）。
+
+**特征 3：铰链角度估计是间接的**
+
+当前从机通过 IMU 角速度积分+互补滤波估算铰链角度，而不是直接读取 GZ 关节角度。
+这是为了与硬件部署保持一致（硬件上没有关节编码器，只有 IMU）。
+
+### 13.6 机架文件与飞控的对应关系
+
+```
+机架文件                           使用的飞控
+─────────────────────────────────────────────────────
+4007_gz_chainwing                → 仅主机飞控（标准 PX4，无从机控制器）
+                                   GZ模型=chainwing（单刚体）
+                                   CW_SLV_EN=未设置（默认0，禁用）
+
+4008_gz_chainwing_3body          → 主机飞控 + 从机飞控
+                                   GZ模型=chainwing_3body（三刚体+铰链）
+                                   CW_SLV_EN=1（启用从机控制器）
+                                   CW_SLV_KP=0.3, CW_SLV_KD=0.05
+
+1103_chainwing_sih.hil           → 仅主机飞控（SIH 硬件仿真）
+                                   无从机控制器
+
+2150_chainwing                   → 仅主机飞控（硬件部署模板）
+                                   无从机控制器
+                                   未来需为从机Pixhawk创建独立机架
+```
+
+---
+
+## 14. 3body仿真完成后的下一步工作
+
+> **核心问题**：3body 仿真已完成，接下来该做什么？
+
+### 14.1 当前已完成的工作清单
+
+| # | 已完成项目 | 对应代码/文件 | 状态 |
+|---|-----------|-------------|------|
+| 1 | 主机飞控（标准 PX4 固定翼） | `4007_gz_chainwing` + 标准 FW 模块 | ✅ 已验证飞行 |
+| 2 | 三体 GZ 模型（高刚度铰链） | `chainwing_3body/model.sdf` | ✅ 模型已创建 |
+| 3 | 从机控制模块 | `src/modules/chainwing_slave/` | ✅ 代码已编写 |
+| 4 | uORB 铰链状态消息 | `msg/ChainwingHingeStatus.msg` | ✅ 已注册 |
+| 5 | GZ servo 输出修正 | `GZMixingInterfaceServo.cpp` 修改 | ✅ 已实现 |
+| 6 | 3body 机架配置 | `4008_gz_chainwing_3body` | ✅ 参数已配置 |
+| 7 | SITL board 注册 | `default.px4board` 添加模块 | ✅ 已添加 |
+| 8 | 参数单位修复 | 移除无效 `@unit` | ✅ 编译通过 |
+
+### 14.2 下一步工作路线图（6个阶段）
+
+```
+═══════════════════════════════════════════════════════════════
+  阶段 1（当前）      阶段 2           阶段 3          阶段 4           阶段 5         阶段 6
+  仿真基础验证  →  从机控制调参  →  多实例仿真  →  MAVLink通信  →  硬件适配  →  飞行测试
+  [2-3天]          [3-5天]         [5-7天]        [5-7天]         [3-5天]       [持续]
+═══════════════════════════════════════════════════════════════
+```
+
+#### 阶段 1：仿真基础验证（2-3天）— 🔴 立即开始
+
+**目标**：确认 3body 模型能正确加载，从机模块能运行，铰链控制有基本效果。
+
+| 步骤 | 具体操作 | 验收标准 |
+|------|---------|----------|
+| 1.1 | 编译：`make px4_sitl_default` | 零错误、零新警告 |
+| 1.2 | 启动仿真：`PX4_SYS_AUTOSTART=4008 PX4_GZ_MODEL_POSE="0,0,0.3,0,0,0" make px4_sitl gz_chainwing_3body` | GZ 窗口显示三体模型，PX4 shell 可用 |
+| 1.3 | 验证模型：GZ 中检查 `hinge_left`/`hinge_right` 关节存在 | `gz topic -l` 能看到关节状态话题 |
+| 1.4 | 验证模块：PX4 shell 输入 `chainwing_slave status` | 显示 Enabled=YES, 铰链角度数值 |
+| 1.5 | 验证消息：`listener chainwing_hinge_status` | 50Hz 数据流，有 trim 值 |
+| 1.6 | 起飞测试：Mission 模式自动起飞 | 飞机起飞，铰链角度在 ±5° 内 |
+| 1.7 | 铰链对比：分别用 `CW_SLV_EN=0` 和 `CW_SLV_EN=1` 飞行，对比日志 | 启用时铰链 RMS 角度更小 |
+
+**如果阶段 1 遇到问题的排查顺序**：
+```
+模型加载失败? → 检查 model.sdf 语法，确认 GZ 版本支持 revolute joint + spring
+模块启动失败? → 检查 Kconfig/CMakeLists/px4board 注册链
+铰链角始终为0? → 检查 vehicle_angular_velocity 是否有数据
+铰链发散/爆炸? → 降低 joint stiffness（500→200）或增大 damping（50→100）
+```
+
+#### 阶段 2：从机控制调参（3-5天）
+
+**目标**：通过仿真飞行日志，优化 PD 控制器增益，使铰链角度稳定在可接受范围。
+
+| 步骤 | 具体操作 | 验收标准 |
+|------|---------|----------|
+| 2.1 | 巡航飞行记录日志（`logger on`，飞行 2 分钟） | 获得 `.ulg` 日志文件 |
+| 2.2 | 用 PlotJuggler 或 FlightPlot 分析 `chainwing_hinge_status` | 确认铰链角度波形 |
+| 2.3 | 调整 `CW_SLV_KP`：从 0.1 到 0.5，步长 0.1 | 找到响应最快且无振荡的值 |
+| 2.4 | 调整 `CW_SLV_KD`：从 0.01 到 0.2，步长 0.02 | 找到阻尼最优的值 |
+| 2.5 | 调整 `CW_SLV_TRIM_MAX`：测试 0.1 / 0.2 / 0.3 / 0.5 | 确认 30% 是否足够 |
+| 2.6 | 极端工况测试：大转弯（bank=30°）、突然爬升、突然下降 | 铰链角度不超过 ±5° |
+| 2.7 | 铰链刚度敏感性分析：测试 200/500/1000 N·m/rad | 确认控制律在各刚度下都稳定 |
+
+**调参经验公式**：
+```
+初始估计：
+  Kp_start = 2 × ζ × ωn / (d_CL/dα × q × S × c)
+           ≈ 2 × 0.7 × 3.14 / (5.25 × 245 × 0.36 × 0.3)
+           ≈ 0.03（无量纲增益）
+
+  但仿真中 Kp=0.3 工作良好（因为 output 是归一化量，不是直接的物理量）
+
+调参策略：
+  1. 先固定 Kd=0, 增大 Kp 直到振荡
+  2. 设 Kp = 0.6 × Kp_振荡
+  3. 增大 Kd 直到振荡消失
+  4. 微调
+```
+
+#### 阶段 3：多实例仿真 — 模拟真正的主从分离（5-7天）
+
+**目标**：从"单 PX4 实例"升级为"3个 PX4 实例"，模拟真实的三飞控架构。
+
+这是从仿真到硬件的**关键跨越步骤**。
+
+| 步骤 | 具体操作 | 详细说明 |
+|------|---------|----------|
+| 3.1 | 创建主机专用机架 `4009_gz_chainwing_master` | 仅主机逻辑，`MAV_SYS_ID=1`，禁用 `CW_SLV_EN` |
+| 3.2 | 创建从机专用机架 `4010_gz_chainwing_slave` | 仅从机逻辑，`MAV_SYS_ID=2`/`3`，启用 `CW_SLV_EN=1` |
+| 3.3 | 多实例启动脚本 | 3 个 PX4 实例绑定同一个 GZ 模型的不同 body |
+| 3.4 | 实现 MAVLink 通信桥 | 主机通过 MAVLink 发送 pitch/throttle 命令给从机 |
+| 3.5 | 从机接收主机命令并执行 | 从机将主机的 servo 指令作为基准，叠加自身 trim |
+| 3.6 | 验证主从协调飞行 | 3 个 PX4 实例协调，铰链角度稳定 |
+
+**多实例启动示例**（概念）：
+```bash
+# 终端 1：启动 GZ 世界 + 模型
+gz sim -v4 -r flat_terrain.sdf --gui
+
+# 终端 2：主机 PX4 实例（控制 base_link）
+PX4_SYS_AUTOSTART=4009 PX4_GZ_MODEL=chainwing_3body \
+  MAVLINK_SYS_ID=1 ./build/px4_sitl_default/bin/px4 -i 0
+
+# 终端 3：左从机 PX4 实例（控制 left_unit）
+PX4_SYS_AUTOSTART=4010 \
+  MAVLINK_SYS_ID=2 ./build/px4_sitl_default/bin/px4 -i 1
+
+# 终端 4：右从机 PX4 实例（控制 right_unit）
+PX4_SYS_AUTOSTART=4010 \
+  MAVLINK_SYS_ID=3 ./build/px4_sitl_default/bin/px4 -i 2
+```
+
+> ⚠️ **注意**：阶段 3 需要对 `gz_bridge` 进行较大修改，使不同 PX4 实例订阅不同 body 的传感器话题。这是技术难度最高的一步。
+
+#### 阶段 4：MAVLink 主从通信实现（5-7天）
+
+**目标**：实现主机 → 从机的命令传输和从机 → 主机的状态反馈。
+
+| 步骤 | 具体操作 | 详细说明 |
+|------|---------|----------|
+| 4.1 | 选择 MAVLink 消息类型 | 主→从：`SET_ACTUATOR_CONTROL_TARGET` 或自定义消息 |
+| 4.2 | 配置 UART 串口仿真 | SITL 中用 TCP/UDP 端口模拟 UART 链路 |
+| 4.3 | 主机发送模块 | 在主机添加定时发送逻辑（50Hz） |
+| 4.4 | 从机接收模块 | 在从机添加 MAVLink 接收解析逻辑 |
+| 4.5 | 从机反馈铰链状态 | 从机通过 MAVLink 回传 hinge_angle/trim |
+| 4.6 | 丢包/延迟处理 | 添加超时检测（100ms 无数据→保持上一次指令） |
+| 4.7 | 联合测试 | 模拟丢包 10%/30%/50%，验证系统鲁棒性 |
+
+**MAVLink 通信协议设计**：
+```
+主机 → 从机（50Hz）：
+  MAVLink SET_ACTUATOR_CONTROL_TARGET {
+    target_system = 2 或 3,
+    controls[0] = throttle_command,      // 整体油门
+    controls[1] = pitch_servo_command,   // 升降舵基准
+    controls[2] = roll_servo_command,    // elevon 基准
+  }
+
+从机 → 主机（10Hz）：
+  MAVLink DEBUG_FLOAT_ARRAY {
+    name = "HINGE_STATUS",
+    data[0] = hinge_angle,  // rad
+    data[1] = hinge_rate,   // rad/s
+    data[2] = trim_output,  // normalized
+    data[3] = data_valid,   // 0 or 1
+  }
+```
+
+#### 阶段 5：硬件适配（3-5天）
+
+**目标**：将仿真验证过的代码适配到真实 Pixhawk 硬件。
+
+| 步骤 | 具体操作 | 注意事项 |
+|------|---------|----------|
+| 5.1 | 创建硬件从机机架 `2151_chainwing_slave` | 基于 `2150_chainwing` 修改，添加 CW_SLV_* 参数 |
+| 5.2 | 配置 UART 串口 | `MAV_1_CONFIG=TELEM2`，波特率 921600 |
+| 5.3 | IMU 校准 | 三个飞控分别校准 IMU（确保坐标系一致） |
+| 5.4 | PWM 输出映射 | 确认从机 PWM 通道对应正确的舵面 |
+| 5.5 | 地面联调 | 供电但不起飞，验证 MAVLink 通信和 trim 输出 |
+| 5.6 | 编译从机固件 | `make px4_fmu-v5_default`（或对应硬件型号） |
+
+#### 阶段 6：飞行测试（持续）
+
+**目标**：真实飞行验证。
+
+| 步骤 | 测试内容 | 通过标准 |
+|------|---------|----------|
+| 6.1 | 地面滑行 | 主从机 MAVLink 通信正常，铰链无异常 |
+| 6.2 | 手抛起飞（低高度） | 成功起飞，铰链角度 < ±3° |
+| 6.3 | 直线巡航 | 平稳飞行 60s，铰链角 RMS < 2° |
+| 6.4 | 温和转弯 | bank ≤ 15°，铰链角度 < ±5° |
+| 6.5 | 大转弯 | bank ≤ 30°，铰链角度 < ±8° |
+| 6.6 | 着陆 | 着陆过程铰链无剧烈波动 |
+
+### 14.3 阶段优先级和依赖关系
+
+```
+阶段 1（基础验证）──→ 阶段 2（调参）──→ 阶段 3（多实例）──→ 阶段 4（MAVLink）
+    │                    │                    │                    │
+    │  无依赖，立即开始    │  需要阶段1通过       │  需要阶段2调好参    │  需要阶段3框架
+    ↓                    ↓                    ↓                    ↓
+  最高优先级            高优先级              中优先级              中优先级
+
+                                                                    ↓
+                                               阶段 5（硬件适配）──→ 阶段 6（飞行测试）
+                                                    │                    │
+                                                    │  需要阶段4通信       │  需要阶段5硬件
+                                                    ↓                    ↓
+                                                  低优先级（仿真完成后） 最终验证
+```
+
+### 14.4 建议立即执行的操作
+
+**今天就可以做的 5 件事**：
+
+1. **编译测试**：
+   ```bash
+   cd ~/PX4-Autopilot
+   make clean
+   make px4_sitl_default
+   ```
+   确认零错误编译通过。
+
+2. **启动 3body 仿真**：
+   ```bash
+   PX4_SYS_AUTOSTART=4008 PX4_GZ_MODEL_POSE="0,0,0.3,0,0,0" make px4_sitl gz_chainwing_3body
+   ```
+   观察 GZ 窗口中三体模型是否正确显示。
+
+3. **检查从机模块运行**：
+   在 PX4 shell 中：
+   ```
+   chainwing_slave status
+   listener chainwing_hinge_status
+   param show CW_SLV_*
+   ```
+
+4. **起飞测试**：
+   ```
+   commander takeoff
+   ```
+   观察飞行稳定性和铰链角度变化。
+
+5. **记录日志用于后续分析**：
+   ```
+   logger on
+   # 飞行 2 分钟
+   logger off
+   ```
+   下载 `.ulg` 文件用 [Flight Review](https://review.px4.io/) 或 PlotJuggler 分析。
+
+### 14.5 每个阶段的产出物
+
+| 阶段 | 交付物 | 格式 |
+|------|--------|------|
+| 1 | 编译通过截图 + GZ 模型截图 + 从机 status 输出 | 截图/文本 |
+| 2 | PD 增益调参结果表 + 铰链角度时域图 | 表格 + 图表 |
+| 3 | 多实例启动脚本 + 新机架文件 + gz_bridge 修改 | 代码 |
+| 4 | MAVLink 通信协议文档 + 收发模块代码 | 文档 + 代码 |
+| 5 | 硬件从机机架文件 + UART 配置指南 | 代码 + 文档 |
+| 6 | 飞行测试报告 + 铰链日志分析 | 报告 |
 
 ---
 
