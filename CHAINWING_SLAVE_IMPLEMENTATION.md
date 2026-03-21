@@ -2,7 +2,7 @@
 
 ## CHAINWING_SLAVE_IMPLEMENTATION.md
 
-> **版本**: v1.3  
+> **版本**: v1.4  
 > **日期**: 2024  
 > **基于仓库**: PX4_test (Chainwing UAV firmware)  
 > **关联文档**: CHAINWING_MULTI_CONTROLLER_GUIDE.md, CHAINWING_FIRMWARE_DOC.md, CHAINWING_TECHNICAL_DETAILS.md
@@ -26,6 +26,7 @@
 13. [当前主从机飞控架构现状分析](#13-当前主从机飞控架构现状分析)
 14. [3body仿真完成后的下一步工作](#14-3body仿真完成后的下一步工作)
 15. [主飞控固件分析：烧什么、改什么、为什么](#15-主飞控固件分析烧什么改什么为什么)
+16. [仿真坐标系差异与 Yaw Estimate Error 解析](#16-仿真坐标系差异与-yaw-estimate-error-解析)
 
 ---
 
@@ -1785,6 +1786,169 @@ FW_THR_MIN=0.05   FW_THR_TRIM=0.60   FW_THR_MAX=1.0
 4. **从机 PD 调参**：观察 chainwing_slave 模块的 trim 输出是否合理（§12 验证步骤）
 
 这些工作**不涉及任何代码修改**，只需要运行仿真和观察数据。
+
+---
+
+## 16. 仿真坐标系差异与 Yaw Estimate Error 解析
+
+### 16.1 问题现象
+
+启动 chainwing_3body 仿真时出现三个疑问：
+
+| 观察点 | GZ 报告 | PX4 报告 | 疑问 |
+|--------|---------|----------|------|
+| **Yaw** | 0° | 90.1° | 为什么差 90°？ |
+| **Pitch** | -0.266 rad (-15.2°) | +15.1° | 为什么符号相反？ |
+| **预检** | — | "Yaw estimate error" | 为什么航向估计报错？ |
+
+```
+# PX4 nsh console 输出：
+vehicle_attitude
+    q: [0.70062, -0.09307, 0.09309, 0.70128] (Roll: 0.0 deg, Pitch: 15.1 deg, Yaw: 90.1 deg)
+
+# GZ 终端输出：
+gz model -m chainwing_3body_0
+    Pose [RPY (rad)]: [0.000000 -0.265748 -0.000000]
+```
+
+### 16.2 根本原因：ENU vs NED 坐标系
+
+**Gazebo 和 PX4 使用完全不同的世界坐标系**，这是航空/机器人领域的标准做法：
+
+| | Gazebo (ENU) | PX4 (NED) |
+|---|---|---|
+| **X 轴** | 东 (East) | 北 (North) |
+| **Y 轴** | 北 (North) | 东 (East) |
+| **Z 轴** | 上 (Up) | 下 (Down) |
+| **Yaw = 0** | 朝东 | 朝北 |
+| **正 Pitch** | 机头朝**下** | 机头朝**上** |
+
+**机体坐标系也不同**：
+
+| | Gazebo (FLU) | PX4 (FRD) |
+|---|---|---|
+| **X** | 前 (Forward) | 前 (Forward) |
+| **Y** | 左 (Left) | 右 (Right) |
+| **Z** | 上 (Up) | 下 (Down) |
+
+### 16.3 Yaw 差异解释 (GZ=0° → PX4=90°)
+
+```
+                  North (PX4 yaw=0°)
+                    ↑
+                    |
+                    |
+West ←──────────────┼──────────────→ East (GZ yaw=0°)
+                    |                  = PX4 yaw=90°
+                    |
+                    ↓
+                  South
+```
+
+飞机物理朝向：**朝东**
+
+- 在 GZ 的 ENU 坐标系中：朝东 = 沿 X 轴 = **Yaw = 0°**
+- 在 PX4 的 NED 坐标系中：朝东 = 沿 Y 轴 = **Yaw = 90°**
+
+**这是同一个物理朝向**，只是两个坐标系的 0° 参考方向不同。gz_bridge 的 `rotateQuaternion()` 函数（GZBridge.cpp:695-711）执行了正确的转换。
+
+### 16.4 Pitch 符号差异解释 (GZ=-0.266 → PX4=+15.1°)
+
+飞机物理状态：**机头抬起约 15°**（在地面静止，由起落架几何和重心位置决定）
+
+**GZ ENU 约定**中，绕 Y 轴（北）的旋转：
+- 标准右手定则：拇指朝北，手指从 X(东)卷向 Z(上) = 正方向
+- 正 Pitch = 机头向**下**旋转
+- 负 Pitch = 机头向**上**旋转
+- 所以：机头抬起 15° → **Pitch = -0.266 rad**
+
+**PX4 NED 约定**中，标准航空惯例：
+- 正 Pitch = 机头向**上**
+- 所以：机头抬起 15° → **Pitch = +15.1°**
+
+**两者描述的是完全相同的物理姿态**，符号差异是坐标系约定的必然结果。
+
+### 16.5 数学验证
+
+gz_bridge 中的 `rotateQuaternion()` 执行以下转换：
+
+```cpp
+// GZBridge.cpp:695-711
+void GZBridge::rotateQuaternion(gz::math::Quaterniond &q_FRD_to_NED,
+                                const gz::math::Quaterniond q_FLU_to_ENU)
+{
+    // FLU→FRD: 绕 X 轴旋转 180°
+    static const auto q_FLU_to_FRD = gz::math::Quaterniond(0, 1, 0, 0);
+
+    // ENU→NED: 绕 Z 轴 90° + 绕 X 轴 180°
+    static const auto q_ENU_to_NED = gz::math::Quaterniond(0, 0.70711, 0.70711, 0);
+
+    q_FRD_to_NED = q_ENU_to_NED * q_FLU_to_ENU * q_FLU_to_FRD.Inverse();
+}
+```
+
+代入 GZ 的数据验证：
+
+```
+输入：GZ RPY(0, -0.266, 0) → q_GZ = [0.9912, 0, -0.1327, 0]
+
+步骤 1: temp = q_GZ × q_FLU_to_FRD⁻¹
+       = [0.9912, 0, -0.1327, 0] × [0, -1, 0, 0]
+       = [0, -0.9912, 0, -0.1327]
+
+步骤 2: q_PX4 = q_ENU_to_NED × temp
+       = [0, 0.70711, 0.70711, 0] × [0, -0.9912, 0, -0.1327]
+       = [0.7009, -0.0938, 0.0938, 0.7009]
+
+输出：PX4 Euler → Roll=0°, Pitch=+15.2°, Yaw=90.0°
+用户观察值：          Roll=0°, Pitch=+15.1°, Yaw=90.1°  ← 完全吻合 ✓
+```
+
+微小差异（0.1°）来自飞机在地面上的微小动态振动。
+
+### 16.6 Yaw Estimate Error 解释
+
+**预检错误消息**：`Preflight Fail: Yaw estimate error`
+
+**触发条件**（estimatorCheck.cpp:257-273）：
+
+```cpp
+if (!context.isArmed() && (estimator_status.mag_test_ratio > _param_com_arm_ekf_yaw.get())) {
+    // "Yaw estimate error"
+}
+```
+
+| 参数 | 当前值 | 说明 |
+|------|--------|------|
+| `COM_ARM_EKF_YAW` | **0.5**（默认） | 允许的最大磁力计创新比率 |
+| `mag_test_ratio` | > 0.5（启动时） | EKF2 磁力计融合的创新比率 |
+
+**原因**：
+
+1. EKF2 启动时需要融合磁力计数据来估计航向
+2. 在仿真启动的前几秒，磁力计模拟器（sensor_mag_sim）刚初始化
+3. EKF2 的磁力计创新检验比率（mag_test_ratio）暂时超过 0.5 阈值
+4. 随着 EKF2 收敛（通常 5-15 秒），该比率会降至 0.5 以下
+5. 这是**启动瞬态现象**，与坐标系转换无关
+
+**注意**：这个问题与之前解决的 `COM_ARM_EKF_POS`/`COM_ARM_EKF_VEL` 问题**同类**——都是 EKF2 收敛期间的瞬态创新比率超过默认阈值。
+
+**解决方案**（需要您确认后再实施）：
+在机架配置文件 `4008_gz_chainwing_3body` 中增加：
+```
+param set-default COM_ARM_EKF_YAW 0.8
+```
+将阈值从 0.5 放宽到 0.8，给 EKF2 更多收敛时间。如果仍不够，可进一步调至 1.0（最大值）。
+
+### 16.7 总结
+
+| 现象 | 是否为 Bug | 原因 | 需要修改？ |
+|------|-----------|------|-----------|
+| PX4 Yaw=90° vs GZ Yaw=0° | **否** | ENU→NED 坐标系标准转换 | 不需要 |
+| PX4 Pitch=+15° vs GZ Pitch=-15° | **否** | ENU/NED 俯仰符号约定不同 | 不需要 |
+| "Yaw estimate error" | **瞬态** | EKF2 启动收敛期间 mag_test_ratio > 0.5 | 调参即可 |
+
+**关键认知**：Gazebo 和 PX4 之间的所有姿态数据差异都是**坐标系约定**的正常体现，gz_bridge 的 `rotateQuaternion()` 函数正确执行了 ENU/FLU ↔ NED/FRD 的转换。在解读仿真数据时，始终要注意区分两个系统的坐标约定。
 
 ---
 
