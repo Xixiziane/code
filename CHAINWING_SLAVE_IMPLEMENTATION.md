@@ -2,7 +2,7 @@
 
 ## CHAINWING_SLAVE_IMPLEMENTATION.md
 
-> **版本**: v1.6  
+> **版本**: v1.7  
 > **日期**: 2024  
 > **基于仓库**: PX4_test (Chainwing UAV firmware)  
 > **关联文档**: CHAINWING_MULTI_CONTROLLER_GUIDE.md, CHAINWING_FIRMWARE_DOC.md, CHAINWING_TECHNICAL_DETAILS.md
@@ -29,6 +29,7 @@
 16. [仿真坐标系差异与 Yaw Estimate Error 解析](#16-仿真坐标系差异与-yaw-estimate-error-解析)
 17. [仿真操作常见问题：左右反转、gz命令、listener中断](#17-仿真操作常见问题左右反转gz命令listener中断)
 18. [深入问题解答：listener -n 0 失效、gz --timeout、QGC 实时查看](#18-深入问题解答listener--n-0-失效gz---timeoutqgc-实时查看)
+19. [进一步问题诊断：wrench 超时、listener 秒退、模块状态确认](#19-进一步问题诊断wrench-超时listener-秒退模块状态确认)
 
 ---
 
@@ -883,14 +884,14 @@ CW_SLV_LP_FREQ  [10.0] : 10.0000
 gz service -s /world/flat_terrain/wrench \
   --reqtype gz.msgs.EntityWrench \
   --reptype gz.msgs.Boolean \
-  --req 'entity: {name: "left_unit", type: MODEL}, wrench: {torque: {x: 5.0}}'
+  --req 'entity: {name: "chainwing_3body_0::left_unit", type: LINK}, wrench: {torque: {x: 5.0}}'
 
 # 等待2秒后施加反向力矩恢复
 sleep 2
 gz service -s /world/flat_terrain/wrench \
   --reqtype gz.msgs.EntityWrench \
   --reptype gz.msgs.Boolean \
-  --req 'entity: {name: "left_unit", type: MODEL}, wrench: {torque: {x: -5.0}}'
+  --req 'entity: {name: "chainwing_3body_0::left_unit", type: LINK}, wrench: {torque: {x: -5.0}}'
 ```
 
 > **注意**：如果上述 `wrench` 服务不可用，可以在 GZ GUI 中手动拖拽模型左翼来产生扰动，或在 PX4 shell 中动态调整 `CW_SLV_KP`（如 `param set CW_SLV_KP 1.0`）来观察不同增益下的响应变化。
@@ -2040,7 +2041,7 @@ PX4 运行时有两个完全独立的命令行环境：
 gz service -s /world/flat_terrain/wrench \
   --reqtype gz.msgs.EntityWrench \
   --reptype gz.msgs.Boolean \
-  --req 'entity: {name: "left_unit", type: MODEL}, wrench: {torque: {x: 5.0}}'
+  --req 'entity: {name: "chainwing_3body_0::left_unit", type: LINK}, wrench: {torque: {x: 5.0}}'
 
 # 等待2秒
 sleep 2
@@ -2049,7 +2050,7 @@ sleep 2
 gz service -s /world/flat_terrain/wrench \
   --reqtype gz.msgs.EntityWrench \
   --reptype gz.msgs.Boolean \
-  --req 'entity: {name: "left_unit", type: MODEL}, wrench: {torque: {x: -5.0}}'
+  --req 'entity: {name: "chainwing_3body_0::left_unit", type: LINK}, wrench: {torque: {x: -5.0}}'
 ```
 
 **两个终端的使用方式**：
@@ -2211,7 +2212,7 @@ pxh> listener chainwing_hinge_status -n 100            # 打印 100 条后停止
 $ gz service -s /world/flat_terrain/wrench \
     --reqtype gz.msgs.EntityWrench \
     --reptype gz.msgs.Boolean \
-    --req 'entity: {name: "left_unit", type: MODEL}, wrench: {torque: {x: 5.0}}'
+    --req 'entity: {name: "chainwing_3body_0::left_unit", type: LINK}, wrench: {torque: {x: 5.0}}'
 
 错误: --req requires --timeout
 ```
@@ -2228,7 +2229,7 @@ gz service -s /world/flat_terrain/wrench \
     --reqtype gz.msgs.EntityWrench \
     --reptype gz.msgs.Boolean \
     --timeout 1000 \
-    --req 'entity: {name: "left_unit", type: MODEL}, wrench: {torque: {x: 5.0}}'
+    --req 'entity: {name: "chainwing_3body_0::left_unit", type: LINK}, wrench: {torque: {x: 5.0}}'
 
 # 等待 2 秒
 sleep 2
@@ -2238,7 +2239,7 @@ gz service -s /world/flat_terrain/wrench \
     --reqtype gz.msgs.EntityWrench \
     --reptype gz.msgs.Boolean \
     --timeout 1000 \
-    --req 'entity: {name: "left_unit", type: MODEL}, wrench: {torque: {x: -5.0}}'
+    --req 'entity: {name: "chainwing_3body_0::left_unit", type: LINK}, wrench: {torque: {x: -5.0}}'
 ```
 
 **`--timeout` 参数说明**：
@@ -2261,7 +2262,7 @@ gz service -s /world/flat_terrain/wrench \
     --reqtype gz.msgs.EntityWrench \
     --reptype gz.msgs.Boolean \
     --timeout 1000 \
-    --req 'entity: {name: "left_unit", type: MODEL}, wrench: {torque: {x: 5.0}}'
+    --req 'entity: {name: "chainwing_3body_0::left_unit", type: LINK}, wrench: {torque: {x: 5.0}}'
 
 echo "等待 2 秒观察响应..."
 sleep 2
@@ -2271,7 +2272,7 @@ gz service -s /world/flat_terrain/wrench \
     --reqtype gz.msgs.EntityWrench \
     --reptype gz.msgs.Boolean \
     --timeout 1000 \
-    --req 'entity: {name: "left_unit", type: MODEL}, wrench: {torque: {x: -5.0}}'
+    --req 'entity: {name: "chainwing_3body_0::left_unit", type: LINK}, wrench: {torque: {x: -5.0}}'
 
 echo "等待 2 秒..."
 sleep 2
@@ -2281,7 +2282,7 @@ gz service -s /world/flat_terrain/wrench \
     --reqtype gz.msgs.EntityWrench \
     --reptype gz.msgs.Boolean \
     --timeout 1000 \
-    --req 'entity: {name: "right_unit", type: MODEL}, wrench: {torque: {x: 5.0}}'
+    --req 'entity: {name: "chainwing_3body_0::right_unit", type: LINK}, wrench: {torque: {x: 5.0}}'
 
 sleep 2
 
@@ -2290,7 +2291,7 @@ gz service -s /world/flat_terrain/wrench \
     --reqtype gz.msgs.EntityWrench \
     --reptype gz.msgs.Boolean \
     --timeout 1000 \
-    --req 'entity: {name: "right_unit", type: MODEL}, wrench: {torque: {x: -5.0}}'
+    --req 'entity: {name: "chainwing_3body_0::right_unit", type: LINK}, wrench: {torque: {x: -5.0}}'
 
 echo "=== 测试完成 ==="
 echo "请在 PX4 shell 中查看: listener chainwing_hinge_status -r 5 -n 20000"
@@ -2425,8 +2426,267 @@ uORB 是 PX4 内部的发布-订阅系统（类似 ROS 的 topic），消息格�
 | QGC 实时改 PID | ✅ 可行 | Parameters → 搜索 CW_SLV |
 | QGC 查看铰链角度 | ❌ 不可行 | 需添加 MAVLink 流（等确认后实施） |
 | GZ 查看关节角度 | ✅ 可行 | `gz topic -e -t .../joint_state`（系统终端） |
-| gz service 施加力矩 | ✅ 可行 | 必须加 `--timeout 1000` 参数 |
+| gz service 施加力矩 | ✅ 可行 | 必须加 `--timeout 1000`，且实体用 `type: LINK`（见 §19） |
 | listener -n 0 无限打印 | ❌ 不可行 | 代码将 0 视为"未指定"，改用 `-n 20000` |
+| listener -n 20000 长时间打印 | ⚠️ 取决于模块 | 如果 chainwing_slave 未运行，2秒超时退出（见 §19） |
+
+---
+
+## 19. 进一步问题诊断：wrench 超时、listener 秒退、模块状态确认
+
+> **版本**: v1.7 新增  
+> **触发原因**: 用户报告 `gz service` wrench 超时 + `listener -n 20000` 仍秒退
+
+### 19.1 问题一：`gz service` wrench 报 "Service call timed out"
+
+**用户命令**：
+```bash
+gz service -s /world/flat_terrain/wrench \
+    --reqtype gz.msgs.EntityWrench \
+    --reptype gz.msgs.Boolean \
+    --timeout 1000 \
+    --req 'entity: {name: "left_unit", type: MODEL}, wrench: {torque: {x: 5.0}}'
+# → Service call timed out
+```
+
+**根本原因：`left_unit` 是 LINK（链接），不是 MODEL（模型）**
+
+在 `chainwing_3body/model.sdf` 中的结构：
+```
+chainwing_3body (MODEL)           ← 这是顶层模型
+├── base_link (LINK)              ← 中间机体
+├── left_unit (LINK)              ← 左翼，是 LINK 不是独立 MODEL
+├── right_unit (LINK)             ← 右翼，是 LINK 不是独立 MODEL
+├── hinge_left (JOINT)
+└── hinge_right (JOINT)
+```
+
+运行 `gz model --list` 显示的是：
+```
+- ground_plane       ← MODEL
+- runway_marking     ← MODEL
+- chainwing_3body_0  ← MODEL（只有这一个是 chainwing 的模型）
+```
+
+**`left_unit` 不在模型列表中** —— 因为它是 `chainwing_3body_0` 模型内部的一个 LINK。
+
+GZ 的 wrench 服务要求精确匹配实体类型：
+- 指定 `type: MODEL` + `name: "left_unit"` → GZ 在模型列表中找不到 → **超时**
+- 指定 `type: LINK` + `name: "chainwing_3body_0::left_unit"` → GZ 精确找到 → **成功**
+
+**正确的命令**（三处修正：`type: LINK` + 完整作用域名 + `--timeout`）：
+```bash
+# 对左翼施加 +5 N·m 滚转力矩
+gz service -s /world/flat_terrain/wrench \
+    --reqtype gz.msgs.EntityWrench \
+    --reptype gz.msgs.Boolean \
+    --timeout 1000 \
+    --req 'entity: {name: "chainwing_3body_0::left_unit", type: LINK}, wrench: {torque: {x: 5.0}}'
+```
+
+**对比表**：
+
+| 参数 | 错误值 | 正确值 | 说明 |
+|------|--------|--------|------|
+| entity name | `"left_unit"` | `"chainwing_3body_0::left_unit"` | 需要完整作用域名（模型名::链接名） |
+| entity type | `MODEL` | `LINK` | left_unit 是链接，不是模型 |
+| --timeout | 缺失（旧版可选） | `1000`（必选） | gz-transport 12+ 要求 |
+
+**修正后的完整测试脚本**（在**系统终端**执行，**不是** pxh>）：
+
+```bash
+#!/bin/bash
+# test_hinge_corrected.sh — 铰链扰动测试（修正版）
+
+echo "=== 铰链扰动测试（修正版） ==="
+
+echo "步骤1: 对 left_unit 施加 +5 N·m 滚转力矩..."
+gz service -s /world/flat_terrain/wrench \
+    --reqtype gz.msgs.EntityWrench \
+    --reptype gz.msgs.Boolean \
+    --timeout 1000 \
+    --req 'entity: {name: "chainwing_3body_0::left_unit", type: LINK}, wrench: {torque: {x: 5.0}}'
+
+echo "等待 3 秒观察铰链响应..."
+sleep 3
+
+echo "步骤2: 施加 -5 N·m 反向力矩恢复..."
+gz service -s /world/flat_terrain/wrench \
+    --reqtype gz.msgs.EntityWrench \
+    --reptype gz.msgs.Boolean \
+    --timeout 1000 \
+    --req 'entity: {name: "chainwing_3body_0::left_unit", type: LINK}, wrench: {torque: {x: -5.0}}'
+
+echo "等待 3 秒..."
+sleep 3
+
+echo "步骤3: 对 right_unit 施加 +5 N·m 滚转力矩..."
+gz service -s /world/flat_terrain/wrench \
+    --reqtype gz.msgs.EntityWrench \
+    --reptype gz.msgs.Boolean \
+    --timeout 1000 \
+    --req 'entity: {name: "chainwing_3body_0::right_unit", type: LINK}, wrench: {torque: {x: 5.0}}'
+
+sleep 3
+
+echo "步骤4: 施加反向力矩恢复..."
+gz service -s /world/flat_terrain/wrench \
+    --reqtype gz.msgs.EntityWrench \
+    --reptype gz.msgs.Boolean \
+    --timeout 1000 \
+    --req 'entity: {name: "chainwing_3body_0::right_unit", type: LINK}, wrench: {torque: {x: -5.0}}'
+
+echo "=== 测试完成 ==="
+```
+
+> **注意**：如果 GZ 仿真中模型名不是 `chainwing_3body_0`（比如重启后变成 `chainwing_3body_1`），
+> 先运行 `gz model --list` 确认实际模型名，再替换命令中的前缀。
+
+### 19.2 问题二：`listener -r 2 -n 20000` 仍然几秒就退出
+
+**用户现象**：运行 `listener chainwing_hinge_status -r 2 -n 20000` 后，只持续了几秒就停止了。
+
+**根本原因：`chainwing_slave` 模块未运行 → 无消息发布 → 2秒超时退出**
+
+PX4 的 `listener` 命令有一个**隐藏的 2 秒超时机制**：
+
+```cpp
+// src/systemcmds/topic_listener/listener_main.cpp:49
+static constexpr float MESSAGE_TIMEOUT_S = 2.0f;
+
+// listener_main.cpp:118 — poll 调用
+if (poll(&fds[0], 2, int(MESSAGE_TIMEOUT_S * 1000)) > 0) {
+    // 收到消息 → 继续循环
+} else {
+    // 2000ms 内无消息 → 退出！
+    PX4_INFO_RAW("Waited for %.1f seconds without a message. Giving up.\n",
+                 (double) MESSAGE_TIMEOUT_S);
+    break;  // ← 退出循环
+}
+```
+
+**逻辑流程**：
+```
+listener -r 2 -n 20000
+    ↓
+订阅 chainwing_hinge_status 话题
+    ↓
+poll() 等待消息，超时 = 2000ms
+    ↓
+┌─ 有消息到达？
+│   YES → 打印消息 → 回到 poll()
+│   NO  → "Waited for 2.0 seconds without a message. Giving up." → 退出
+└─
+```
+
+**关键**：`-n 20000` 只控制"最多打印多少条"，**不能阻止超时退出**。
+如果 2 秒内没有任何消息到达，无论 `-n` 设多大，listener 都会退出。
+
+#### 19.2.1 为什么 chainwing_slave 模块可能未运行？
+
+**检查方法**（在 pxh> 中）：
+```bash
+# 方法1: 检查模块是否运行
+pxh> chainwing_slave status
+# 如果模块未运行，会显示: "not running"
+
+# 方法2: 检查使能参数
+pxh> param show CW_SLV_EN
+# 如果显示 0 或 "not found"，模块不会启动
+```
+
+**可能原因及解决方案**：
+
+| 原因 | 检查方法 | 解决方案 |
+|------|----------|----------|
+| `CW_SLV_EN=0`（默认禁用） | `param show CW_SLV_EN` | `param set CW_SLV_EN 1` |
+| 使用了 4007 而非 4008 机架 | 检查启动日志 | 使用 `make px4_sitl gz_chainwing_3body` |
+| 模块未编译 | 检查 build log | 确认 `default.px4board` 中包含 `chainwing_slave` |
+| 模块崩溃 | `dmesg` | 查看崩溃日志 |
+
+**修复步骤**：
+```bash
+# 步骤1: 在 pxh> 中启用从机模块
+pxh> param set CW_SLV_EN 1
+
+# 步骤2: 手动启动模块（如果未自动启动）
+pxh> chainwing_slave start
+
+# 步骤3: 验证模块运行
+pxh> chainwing_slave status
+# 应显示: "is running"
+
+# 步骤4: 现在 listener 应该能持续接收数据了
+pxh> listener chainwing_hinge_status -r 2 -n 20000
+# 如果模块在运行且发布数据（50Hz），这会持续 20000/2 = 10000秒
+```
+
+#### 19.2.2 区分"消息条数限制"和"超时退出"
+
+| 退出原因 | 表现 | 持续时间 |
+|----------|------|----------|
+| **超时退出**（当前问题） | 打印 "Waited for 2.0 seconds without a message. Giving up." 后退出 | 约 2 秒 |
+| **条数限制**（`-n` 耗尽） | 静默停止，无额外提示 | `-n 20000` 在 2Hz 下 = 10000秒 |
+| **用户中断** | 按 Ctrl+C 或 q | 用户控制 |
+
+**如果用户看到的是"只打印了几条就停了"但没有超时提示**：
+可能是话题发布频率极低（如模块刚启动、处于 idle 状态）。
+chainwing_slave 的 `ScheduleOnInterval(20000_us)` 确保 50Hz 发布，
+但如果 `CW_SLV_EN=0`，模块根本不会调用 `Run()` → 不发布任何消息。
+
+### 19.3 快速诊断清单
+
+在遇到问题时，按顺序执行以下诊断：
+
+```bash
+# ============ 在 pxh> 中 ============
+
+# 1. 检查从机模块是否启用
+param show CW_SLV_EN
+# 预期: 1（如果是 0，执行 param set CW_SLV_EN 1）
+
+# 2. 检查从机模块状态
+chainwing_slave status
+# 预期: "is running"（如果 "not running"，执行 chainwing_slave start）
+
+# 3. 检查话题是否有数据
+listener chainwing_hinge_status
+# 预期: 打印数据（如果 "Giving up"，回到步骤 1-2）
+
+# 4. 长时间监听
+listener chainwing_hinge_status -r 2 -n 20000
+# 预期: 持续打印（10000秒）
+
+# ============ 在系统终端中 ============
+
+# 5. 确认模型名
+gz model --list
+# 记录实际模型名，如 chainwing_3body_0
+
+# 6. 施加力矩测试（替换实际模型名）
+gz service -s /world/flat_terrain/wrench \
+    --reqtype gz.msgs.EntityWrench \
+    --reptype gz.msgs.Boolean \
+    --timeout 1000 \
+    --req 'entity: {name: "chainwing_3body_0::left_unit", type: LINK}, wrench: {torque: {x: 5.0}}'
+# 预期: data: true
+```
+
+### 19.4 §18 勘误
+
+§18 中的以下内容需要修正：
+
+| 位置 | 原内容 | 修正 |
+|------|--------|------|
+| §18.1 | `listener -n 20000` 能长时间运行 | 前提：chainwing_slave 必须正在运行，否则 2 秒超时退出 |
+| §18.2 | `type: MODEL` | **已修正为** `type: LINK`（全文 11 处已更新） |
+| §18.4 总结表 | "gz service 施加力矩: ✅ 可行" | 需要正确的实体类型（LINK）和完整作用域名 |
+
+> **全文 `type: MODEL` → `type: LINK` 修正统计**：
+> - §12.4（2处）：施加力矩测试命令
+> - §18.2（6处）：gz service 示例 + 测试脚本
+> - §18.2 test_hinge.sh 脚本（3处）：left_unit × 2 + right_unit × 1
+> - 总计 11 处已全部修正为 `entity: {name: "chainwing_3body_0::left_unit", type: LINK}`
 
 ---
 
