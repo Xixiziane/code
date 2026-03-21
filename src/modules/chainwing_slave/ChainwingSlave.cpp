@@ -120,6 +120,12 @@ void ChainwingSlave::Run()
 	status.trim_right = trim_right;
 	status.data_valid = _ref_initialized;
 	_hinge_status_pub.publish(status);
+
+	// MAVLink communication: publish hinge data and receive master commands
+	if (_param_comm_enable.get() != 0) {
+		publishDebugArray();
+		processMasterCommands();
+	}
 }
 
 void ChainwingSlave::updateHingeEstimate(float dt)
@@ -213,6 +219,53 @@ float ChainwingSlave::computeTrim(float angle, float rate)
 	return trim;
 }
 
+void ChainwingSlave::publishDebugArray()
+{
+	// Pack hinge status into DEBUG_FLOAT_ARRAY for MAVLink transmission
+	// This gets automatically bridged to MAVLink by the mavlink module's
+	// DEBUG_FLOAT_ARRAY stream when running in onboard mode.
+	debug_array_s dbg{};
+	dbg.timestamp = hrt_absolute_time();
+	dbg.id = CW_HINGE_STATUS_ID;
+	strncpy(dbg.name, "CW_HINGE", sizeof(dbg.name));
+	dbg.name[sizeof(dbg.name) - 1] = '\0';
+
+	dbg.data[0] = _hinge_angle_left;
+	dbg.data[1] = _hinge_angle_right;
+	dbg.data[2] = _hinge_rate_left;
+	dbg.data[3] = _hinge_rate_right;
+	dbg.data[4] = computeTrim(_hinge_angle_left, _hinge_rate_left);
+	dbg.data[5] = computeTrim(_hinge_angle_right, _hinge_rate_right);
+	dbg.data[6] = _ref_initialized ? 1.0f : 0.0f;
+
+	_debug_array_pub.publish(dbg);
+}
+
+void ChainwingSlave::processMasterCommands()
+{
+	// Read master commands from debug_array (bridged from MAVLink receiver)
+	// The MAVLink receiver automatically converts incoming DEBUG_FLOAT_ARRAY
+	// messages to the debug_array uORB topic.
+	debug_array_s cmd{};
+
+	while (_debug_array_sub.update(&cmd)) {
+		// Filter: only process messages with our command ID
+		if (cmd.id == CW_MASTER_CMD_ID && strncmp(cmd.name, "CW_CMD", 6) == 0) {
+			_master_pitch_cmd = math::constrain(cmd.data[0], -1.0f, 1.0f);
+			_master_throttle = math::constrain(cmd.data[1], 0.0f, 1.0f);
+			_master_roll_cmd = math::constrain(cmd.data[2], -1.0f, 1.0f);
+			_last_master_cmd = hrt_absolute_time();
+			_master_cmd_valid = true;
+		}
+	}
+
+	// Timeout: invalidate master command if not received for 500ms
+	if (_master_cmd_valid && hrt_elapsed_time(&_last_master_cmd) > MASTER_CMD_TIMEOUT_US) {
+		_master_cmd_valid = false;
+		PX4_WARN("Master command timeout");
+	}
+}
+
 int ChainwingSlave::task_spawn(int argc, char *argv[])
 {
 	ChainwingSlave *instance = new ChainwingSlave();
@@ -245,6 +298,7 @@ int ChainwingSlave::print_status()
 {
 	PX4_INFO("Chain-wing slave controller");
 	PX4_INFO("  Enabled: %s", (_param_enable.get() != 0) ? "YES" : "NO");
+	PX4_INFO("  Communication: %s", (_param_comm_enable.get() != 0) ? "ENABLED" : "DISABLED");
 	PX4_INFO("  Reference initialized: %s", _ref_initialized ? "YES" : "NO");
 	PX4_INFO("  Hinge angles: left=%.3f deg, right=%.3f deg",
 		 (double)math::degrees(_hinge_angle_left),
@@ -253,6 +307,13 @@ int ChainwingSlave::print_status()
 		 (double)_hinge_rate_left, (double)_hinge_rate_right);
 	PX4_INFO("  PD gains: Kp=%.2f, Kd=%.2f, max_trim=%.2f",
 		 (double)_param_kp.get(), (double)_param_kd.get(), (double)_param_trim_max.get());
+
+	if (_param_comm_enable.get() != 0) {
+		PX4_INFO("  Master cmd valid: %s", _master_cmd_valid ? "YES" : "NO");
+		PX4_INFO("  Master pitch=%.2f, throttle=%.2f, roll=%.2f",
+			 (double)_master_pitch_cmd, (double)_master_throttle, (double)_master_roll_cmd);
+	}
+
 	return 0;
 }
 
@@ -274,10 +335,21 @@ Computes PD-based elevator trim corrections that are applied on top of
 the master's overall pitch command.
 
 ### Communication (Hardware)
-Master → Slave: UART + MAVLink v2 protocol
-  - Overall pitch setpoint and throttle command
-Slave → Master: UART + MAVLink v2 protocol
-  - Hinge status feedback
+When CW_SLV_COMM_EN=1, enables inter-controller communication via
+MAVLink DEBUG_FLOAT_ARRAY messages:
+
+Slave → Master (id=42, name="CW_HINGE"):
+  data[0-1]: hinge angles (rad)
+  data[2-3]: hinge rates (rad/s)
+  data[4-5]: trim values (normalized)
+  data[6]:   data_valid flag
+
+Master → Slave (id=43, name="CW_CMD"):
+  data[0]: pitch command (normalized [-1, 1])
+  data[1]: throttle (normalized [0, 1])
+  data[2]: roll command (normalized [-1, 1])
+
+Requires: mavlink start -d /dev/ttyS2 -b 921600 -m onboard
 
 ### Control Law
   δ_trim = Kp × θ_hinge + Kd × θ̇_hinge

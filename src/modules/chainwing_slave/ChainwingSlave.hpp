@@ -63,6 +63,7 @@
 #include <uORB/topics/vehicle_attitude.h>
 #include <uORB/topics/actuator_servos.h>
 #include <uORB/topics/chainwing_hinge_status.h>
+#include <uORB/topics/debug_array.h>
 
 #include <lib/mathlib/mathlib.h>
 #include <matrix/matrix/math.hpp>
@@ -72,6 +73,11 @@ using namespace time_literals;
 class ChainwingSlave : public ModuleBase<ChainwingSlave>, public ModuleParams, public px4::ScheduledWorkItem
 {
 public:
+	// Debug array IDs for inter-controller communication protocol
+	static constexpr uint16_t CW_HINGE_STATUS_ID = 42;  ///< Slave → Master: hinge status
+	static constexpr uint16_t CW_MASTER_CMD_ID = 43;    ///< Master → Slave: commands
+	static constexpr hrt_abstime MASTER_CMD_TIMEOUT_US = 500000; ///< 500ms master command timeout
+
 	ChainwingSlave();
 	~ChainwingSlave() override = default;
 
@@ -107,20 +113,51 @@ private:
 	 */
 	float computeTrim(float angle, float rate);
 
+	/**
+	 * Publish hinge status via debug_array for MAVLink transmission.
+	 * Uses DEBUG_FLOAT_ARRAY (id=42, name="CW_HINGE") to transmit:
+	 *   data[0]: hinge_angle_left   (rad)
+	 *   data[1]: hinge_angle_right  (rad)
+	 *   data[2]: hinge_rate_left    (rad/s)
+	 *   data[3]: hinge_rate_right   (rad/s)
+	 *   data[4]: trim_left          (normalized)
+	 *   data[5]: trim_right         (normalized)
+	 *   data[6]: data_valid         (1.0 or 0.0)
+	 */
+	void publishDebugArray();
+
+	/**
+	 * Process master commands received via debug_array MAVLink bridge.
+	 * Reads DEBUG_FLOAT_ARRAY (id=43, name="CW_CMD") containing:
+	 *   data[0]: master_pitch_cmd   (normalized [-1, 1])
+	 *   data[1]: master_throttle    (normalized [0, 1])
+	 *   data[2]: master_roll_cmd    (normalized [-1, 1])
+	 */
+	void processMasterCommands();
+
 	// Subscriptions
 	uORB::SubscriptionInterval _parameter_update_sub{ORB_ID(parameter_update), 1_s};
 	uORB::Subscription _vehicle_angular_velocity_sub{ORB_ID(vehicle_angular_velocity)};
 	uORB::Subscription _vehicle_attitude_sub{ORB_ID(vehicle_attitude)};
 	uORB::Subscription _actuator_servos_sub{ORB_ID(actuator_servos)};
+	uORB::Subscription _debug_array_sub{ORB_ID(debug_array)};   ///< Master commands via MAVLink bridge
 
 	// Publications
 	uORB::Publication<chainwing_hinge_status_s> _hinge_status_pub{ORB_ID(chainwing_hinge_status)};
+	uORB::Publication<debug_array_s> _debug_array_pub{ORB_ID(debug_array)};  ///< Hinge status via MAVLink bridge
 
 	// State variables for IMU integration
 	float _hinge_angle_left{0.0f};   ///< Estimated left hinge angle (rad)
 	float _hinge_angle_right{0.0f};  ///< Estimated right hinge angle (rad)
 	float _hinge_rate_left{0.0f};    ///< Left hinge angular rate (rad/s)
 	float _hinge_rate_right{0.0f};   ///< Right hinge angular rate (rad/s)
+
+	// Master commands received via MAVLink
+	float _master_pitch_cmd{0.0f};   ///< Master pitch command (normalized [-1, 1])
+	float _master_throttle{0.0f};    ///< Master throttle command (normalized [0, 1])
+	float _master_roll_cmd{0.0f};    ///< Master roll command (normalized [-1, 1])
+	hrt_abstime _last_master_cmd{0}; ///< Timestamp of last received master command
+	bool _master_cmd_valid{false};   ///< True if master command received within timeout
 
 	// Reference attitude (captured at startup for IMU integration baseline)
 	float _pitch_ref{0.0f};
@@ -135,6 +172,7 @@ private:
 		(ParamFloat<px4::params::CW_SLV_KD>)      _param_kd,
 		(ParamFloat<px4::params::CW_SLV_TRIM_MAX>) _param_trim_max,
 		(ParamFloat<px4::params::CW_SLV_LP_FREQ>)  _param_lp_freq,
-		(ParamInt<px4::params::CW_SLV_EN>)         _param_enable
+		(ParamInt<px4::params::CW_SLV_EN>)         _param_enable,
+		(ParamInt<px4::params::CW_SLV_COMM_EN>)    _param_comm_enable
 	)
 };

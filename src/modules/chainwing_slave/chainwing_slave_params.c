@@ -117,3 +117,22 @@ PARAM_DEFINE_FLOAT(CW_SLV_TRIM_MAX, 0.3f);
  * @group Chain-Wing Slave
  */
 PARAM_DEFINE_FLOAT(CW_SLV_LP_FREQ, 10.0f);
+
+/**
+ * MAVLink communication enable
+ *
+ * Enable inter-controller communication via UART + MAVLink.
+ * When enabled, the slave publishes hinge status as
+ * DEBUG_FLOAT_ARRAY (id=42, name="CW_HINGE") and listens for
+ * master commands as DEBUG_FLOAT_ARRAY (id=43, name="CW_CMD").
+ *
+ * Requires a MAVLink instance configured in onboard mode:
+ *   mavlink start -d /dev/ttyS2 -b 921600 -m onboard
+ *
+ * 0 = disabled (uORB only, for simulation)
+ * 1 = enabled  (MAVLink bridge, for hardware verification)
+ *
+ * @boolean
+ * @group Chain-Wing Slave
+ */
+PARAM_DEFINE_INT32(CW_SLV_COMM_EN, 0);
