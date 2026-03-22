@@ -46,9 +46,9 @@
 
 | 参数 | 值 | 来源 |
 |------|-----|------|
-| 铰链刚度 | 500 N·m/rad | model.sdf |
-| 铰链阻尼 | 50 N·m·s/rad | model.sdf |
-| 铰链极限 | ±5° (±0.0873 rad) | model.sdf |
+| 铰链刚度 | 200 N·m/rad | model.sdf |
+| 铰链阻尼 | 12 N·m·s/rad | model.sdf |
+| 铰链极限 | ±15° (±0.262 rad) | model.sdf |
 | 巡航速度 | 20 m/s | MATLAB 模型 |
 | 总质量 | ~15.6 kg (三体) | MATLAB 模型 |
 
