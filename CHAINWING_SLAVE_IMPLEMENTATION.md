@@ -2,7 +2,7 @@
 
 ## CHAINWING_SLAVE_IMPLEMENTATION.md
 
-> **版本**: v2.4  
+> **版本**: v2.5  
 > **日期**: 2024  
 > **基于仓库**: PX4_test (Chainwing UAV firmware)  
 > **关联文档**: CHAINWING_MULTI_CONTROLLER_GUIDE.md, CHAINWING_FIRMWARE_DOC.md, CHAINWING_TECHNICAL_DETAILS.md
@@ -36,6 +36,7 @@
 23. [第二次飞行日志分析：横滚评估 + 俯仰阶跃响应为0的原因](#23-第二次飞行日志分析横滚评估--俯仰阶跃响应为0的原因)
 24. [硬件通信验证评估：能否直接用于两机通信 + 需增加的代码](#24-硬件通信验证评估能否直接用于两机通信--需增加的代码)
 25. [铰链参数保守性分析：刚度/阻尼是否过大导致从机代码失效](#25-铰链参数保守性分析刚度阻尼是否过大导致从机代码失效)
+26. [CW模块关闭后的行为分析：修正油门是否失效](#26-cw模块关闭后的行为分析修正油门是否失效)
 
 ---
 
@@ -4528,3 +4529,120 @@ report.pdf §3.2.1 描述：
 ---
 
 *文档结束*
+
+---
+
+## 26. CW模块关闭后的行为分析：修正油门是否失效
+
+> **日期**: 2026-03-22  
+> **问题**: 如果仿真时将 CW_SLV_EN 设为 0（关闭 chainwing_slave 模块），修正油门（trim 修正）是否不会起作用？
+
+### 26.1 结论
+
+**✅ 是的，你的判断完全正确。** CW_SLV_EN=0 时，所有铰链修正功能完全失效，舵面输出仅由标准 PX4 飞控控制。
+
+### 26.2 完整代码链路追踪
+
+关闭 CW 模块后，修正油门失效经过 **4 个判断点**：
+
+```
+判断点 1: ChainwingSlave::Run()
+  CW_SLV_EN == 0 → return; (立即退出，不做任何计算)
+  ↓ (不执行)
+判断点 2: 铰链估算 + PD计算
+  不执行 → trim_left/trim_right 不计算
+  ↓ (不执行)
+判断点 3: _hinge_status_pub.publish()
+  不执行 → chainwing_hinge_status 话题从未发布
+  ↓
+判断点 4: GZMixingInterfaceServo::updateOutputs()
+  _hinge_status_sub.copy() → 返回 false (话题不存在)
+  hinge_valid = false
+  → trim 修正代码块被跳过
+  → 舵面输出 = 纯控制分配器输出 (无修正)
+```
+
+### 26.3 代码证据
+
+**判断点 1 — ChainwingSlave.cpp:88-91**:
+```cpp
+// Check if slave controller is enabled
+if (_param_enable.get() == 0) {
+    return;  // ← 立即退出，不计算任何东西
+}
+```
+- CW_SLV_EN=0 → `_param_enable.get()` 返回 0 → 函数直接 return
+- **结果**: 不执行铰链估算、不执行 PD 计算、不发布任何话题
+
+**判断点 4 — GZMixingInterfaceServo.cpp:62-86**:
+```cpp
+// 第 62-64 行: 读取铰链修正
+chainwing_hinge_status_s hinge_status{};  // 零初始化: trim=0, valid=false
+bool hinge_valid = _hinge_status_sub.copy(&hinge_status) && hinge_status.data_valid;
+//   copy() 返回 false (话题未发布) → hinge_valid = false
+
+// 第 76-86 行: 仅当 hinge_valid 为 true 时才添加修正
+if (hinge_valid) {       // ← hinge_valid = false → 整个块被跳过
+    if (i == 0) {
+        output += (double)hinge_status.trim_left;   // 不执行
+    } else if (i == 2) {
+        output += (double)hinge_status.trim_right;  // 不执行
+    }
+}
+```
+
+### 26.4 双重安全机制
+
+GZMixingInterfaceServo 有 **两层保护**，确保无效数据不会影响舵面：
+
+| 保护层 | 条件 | 作用 |
+|--------|------|------|
+| **第一层** | `_hinge_status_sub.copy()` 返回值 | 话题未发布 → false |
+| **第二层** | `hinge_status.data_valid` 字段 | 模块运行但参考未初始化 → false |
+
+即使模块正在运行（CW_SLV_EN=1），在姿态参考初始化之前，`data_valid = false`，修正同样不会生效。
+
+### 26.5 CW_SLV_EN=0 时的完整影响
+
+| 功能 | CW_SLV_EN=1 | CW_SLV_EN=0 |
+|------|-------------|-------------|
+| 铰链角度估算 | ✅ 每 50Hz 更新 | ❌ 不执行 |
+| PD 修正计算 | ✅ trim_left/right 非零 | ❌ 不计算 |
+| chainwing_hinge_status 发布 | ✅ 每 50Hz | ❌ 不发布 |
+| debug_array MAVLink 回传 | ✅ (如 COMM_EN=1) | ❌ 不发布 |
+| 舵面 servo_0 修正 | ✅ output += trim_left | ❌ 无修正 |
+| 舵面 servo_2 修正 | ✅ output += trim_right | ❌ 无修正 |
+| 升降舵 servo_1 | 不受影响 | 不受影响 |
+| 标准 PX4 姿态控制 | 正常工作 | 正常工作 |
+| logger 记录 | ✅ chainwing_hinge_status | ❌ 话题不存在 |
+
+### 26.6 仿真对比验证建议
+
+利用这个特性做 **A/B 对比飞行**：
+
+```bash
+# --- 飞行 A: 无从机修正（纯标准 PX4 飞控）---
+pxh> param set CW_SLV_EN 0
+# 执行自主飞行任务，记录日志
+
+# --- 飞行 B: 有从机修正 ---
+pxh> param set CW_SLV_EN 1
+# 执行相同任务，记录日志
+
+# --- 对比分析 ---
+# 用 PlotJuggler 打开两份 .ulg 文件
+# 对比: roll tracking error, pitch stability, elevon deflection
+```
+
+**预期差异**:
+- 当铰链几乎不动（k=200 很硬）时: A/B 差异很小（弹簧主导）
+- 当铰链有明显偏转时: B 应有更好的稳定性（控制器贡献 38%）
+
+### 26.7 总结
+
+| 问题 | 答案 |
+|------|------|
+| CW 关闭后修正油门是否失效？ | ✅ **是的，完全失效** |
+| 会影响飞行安全吗？ | ❌ 不会（双重安全检查） |
+| 舵面输出变成什么？ | 纯标准 PX4 控制分配器输出 |
+| 能否用来做对比实验？ | ✅ 建议 A/B 对比飞行验证从机修正效果 |
