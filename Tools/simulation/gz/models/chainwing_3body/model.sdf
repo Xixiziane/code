@@ -506,13 +506,13 @@
       <axis>
         <xyz>1 0 0</xyz>
         <limit>
-          <lower>-0.087</lower>
-          <upper>0.087</upper>
+          <lower>-0.175</lower>
+          <upper>0.175</upper>
         </limit>
         <dynamics>
-          <damping>50.0</damping>
+          <damping>5.0</damping>
           <spring_reference>0.0</spring_reference>
-          <spring_stiffness>500.0</spring_stiffness>
+          <spring_stiffness>50.0</spring_stiffness>
         </dynamics>
       </axis>
       <physics>
@@ -529,13 +529,13 @@
       <axis>
         <xyz>1 0 0</xyz>
         <limit>
-          <lower>-0.087</lower>
-          <upper>0.087</upper>
+          <lower>-0.175</lower>
+          <upper>0.175</upper>
         </limit>
         <dynamics>
-          <damping>50.0</damping>
+          <damping>5.0</damping>
           <spring_reference>0.0</spring_reference>
-          <spring_stiffness>500.0</spring_stiffness>
+          <spring_stiffness>50.0</spring_stiffness>
         </dynamics>
       </axis>
       <physics>

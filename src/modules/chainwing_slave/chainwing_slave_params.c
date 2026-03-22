@@ -66,7 +66,7 @@ PARAM_DEFINE_INT32(CW_SLV_EN, 0);
  * @increment 0.05
  * @group Chain-Wing Slave
  */
-PARAM_DEFINE_FLOAT(CW_SLV_KP, 0.3f);
+PARAM_DEFINE_FLOAT(CW_SLV_KP, 2.0f);
 
 /**
  * Hinge PD derivative gain
@@ -82,7 +82,7 @@ PARAM_DEFINE_FLOAT(CW_SLV_KP, 0.3f);
  * @increment 0.01
  * @group Chain-Wing Slave
  */
-PARAM_DEFINE_FLOAT(CW_SLV_KD, 0.05f);
+PARAM_DEFINE_FLOAT(CW_SLV_KD, 0.3f);
 
 /**
  * Maximum trim deflection
