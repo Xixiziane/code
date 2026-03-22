@@ -2,7 +2,7 @@
 
 ## CHAINWING_SLAVE_IMPLEMENTATION.md
 
-> **版本**: v2.5  
+> **版本**: v2.6  
 > **日期**: 2024  
 > **基于仓库**: PX4_test (Chainwing UAV firmware)  
 > **关联文档**: CHAINWING_MULTI_CONTROLLER_GUIDE.md, CHAINWING_FIRMWARE_DOC.md, CHAINWING_TECHNICAL_DETAILS.md
@@ -37,6 +37,7 @@
 24. [硬件通信验证评估：能否直接用于两机通信 + 需增加的代码](#24-硬件通信验证评估能否直接用于两机通信--需增加的代码)
 25. [铰链参数保守性分析：刚度/阻尼是否过大导致从机代码失效](#25-铰链参数保守性分析刚度阻尼是否过大导致从机代码失效)
 26. [CW模块关闭后的行为分析：修正油门是否失效](#26-cw模块关闭后的行为分析修正油门是否失效)
+27. [ODOMETRY 刷屏问题：多实例通信必须用 custom 模式](#27-odometry-刷屏问题多实例通信必须用-custom-模式)
 
 ---
 
@@ -4646,3 +4647,124 @@ pxh> param set CW_SLV_EN 1
 | 会影响飞行安全吗？ | ❌ 不会（双重安全检查） |
 | 舵面输出变成什么？ | 纯标准 PX4 控制分配器输出 |
 | 能否用来做对比实验？ | ✅ 建议 A/B 对比飞行验证从机修正效果 |
+
+---
+
+## §27 ODOMETRY 刷屏问题：多实例通信必须用 custom 模式
+
+> **日期**: 2026-03-22  
+> **触发**: 用户运行 `mavlink start -x -u 24550 -o 24551 -r 4000 -m onboard` 后
+> 控制台被 `WARN [mavlink] ODOMETRY: estimator_type 8 unsupported` 刷屏
+
+### 27.1 问题现象
+
+两个 PX4 SITL 实例通过 UDP 互连后，控制台每秒输出约 60 条警告：
+```
+WARN  [mavlink] ODOMETRY: estimator_type 8 unsupported
+WARN  [mavlink] ODOMETRY: estimator_type 8 unsupported
+...（无限循环）
+```
+
+主机和从机都出现相同症状，完全无法操作 pxh> 命令。
+
+### 27.2 根本原因（代码级追踪）
+
+问题链条：
+
+```
+ONBOARD 模式 → ODOMETRY@30Hz 流 → 硬编码 type=8 → 接收端拒绝 → 警告循环
+```
+
+**4 个关键代码点**：
+
+| # | 文件 | 行号 | 行为 |
+|---|------|------|------|
+| 1 | `mavlink_main.cpp` | 1596 | ONBOARD 模式配置 `ODOMETRY` 流 @ 30 Hz |
+| 2 | `streams/ODOMETRY.hpp` | 140 | **硬编码** `msg.estimator_type = MAV_ESTIMATOR_TYPE_AUTOPILOT` (值=8) |
+| 3 | `mavlink_receiver.cpp` | 1444-1453 | 接收端 switch: type 8 → `default:` → 打印警告 |
+| 4 | — | — | 两实例互连 → 30Hz × 2 = **60 条警告/秒** |
+
+**ODOMETRY.hpp:140 的代码**：
+```cpp
+msg.estimator_type = MAV_ESTIMATOR_TYPE_AUTOPILOT;  // 始终发送值 8
+```
+
+**mavlink_receiver.cpp:1429-1453 支持的类型**：
+```cpp
+switch (odom_in.estimator_type) {
+    case MAV_ESTIMATOR_TYPE_UNKNOWN:  // ✅ 接受
+    case MAV_ESTIMATOR_TYPE_NAIVE:    // ✅ 接受
+    case MAV_ESTIMATOR_TYPE_VISION:   // ✅ 接受 → visual_odometry
+    case MAV_ESTIMATOR_TYPE_VIO:      // ✅ 接受 → visual_odometry
+    case MAV_ESTIMATOR_TYPE_MOCAP:    // ✅ 接受 → mocap_odometry
+    case MAV_ESTIMATOR_TYPE_AUTOPILOT: // ❌ type=8 → 打印警告！
+    default:
+        mavlink_log_critical("ODOMETRY: estimator_type %u unsupported");
+}
+```
+
+### 27.3 解决方案：使用 `-m custom` 替代 `-m onboard`
+
+`-m custom` 模式不配置任何默认流，然后手动只添加需要的 `DEBUG_FLOAT_ARRAY`：
+
+```bash
+# ✅ 正确命令（两步）
+mavlink start -x -u 24550 -o 24551 -r 4000 -m custom
+mavlink stream -u 24550 -s DEBUG_FLOAT_ARRAY -r 10
+
+# ❌ 错误命令（会刷屏）
+mavlink start -x -u 24550 -o 24551 -r 4000 -m onboard
+```
+
+**完整多实例测试命令**：
+
+```bash
+# === 终端 1: 主机 (Instance 0) ===
+PX4_SYS_AUTOSTART=4008 PX4_SIM_MODEL=chainwing_3body PX4_GZ_WORLD=flat_terrain \
+  ./build/px4_sitl_default/bin/px4 -i 0
+
+# 在 pxh> 中执行：
+mavlink start -x -u 24550 -o 24551 -r 4000 -m custom
+mavlink stream -u 24550 -s DEBUG_FLOAT_ARRAY -r 10
+
+# === 终端 2: 从机 (Instance 1) ===
+PX4_SYS_AUTOSTART=4008 PX4_SIM_MODEL=chainwing_3body PX4_GZ_WORLD=flat_terrain \
+  ./build/px4_sitl_default/bin/px4 -i 1
+
+# 在 pxh> 中执行：
+mavlink start -x -u 24551 -o 24550 -r 4000 -m custom
+mavlink stream -u 24551 -s DEBUG_FLOAT_ARRAY -r 10
+param set CW_SLV_COMM_EN 1
+```
+
+### 27.4 ONBOARD vs CUSTOM 模式对比
+
+| 特性 | `-m onboard` | `-m custom` + stream |
+|------|-------------|---------------------|
+| ODOMETRY (30Hz) | ✅ 发送 → **刷屏** | ❌ 不发送 |
+| ATTITUDE (100Hz) | ✅ 发送（不需要） | ❌ 不发送 |
+| DEBUG_FLOAT_ARRAY | ✅ 10Hz | ✅ 10Hz |
+| 总流量 | ~4000 B/s | ~200 B/s |
+| CPU 开销 | 高 | 低 |
+| 多实例安全 | ❌ 会刷屏 | ✅ 安全 |
+| 适用场景 | QGC 连接 | **多实例/硬件通信** |
+
+### 27.5 其他消息的说明
+
+用户日志中的其他消息均为正常：
+
+| 消息 | 含义 | 是否需要处理 |
+|------|------|-------------|
+| `gyro_calibration: updating offsets` | 陀螺仪开机自校准 | ✅ 正常，几秒后停止 |
+| `partner IP: 127.0.0.1` | MAVLink 发现对方地址 | ✅ 正常，说明连接成功 |
+| `orb_advertise_multi: failed to set queue size` | uORB 队列大小限制 | ⚠️ 无害警告 |
+| `TRAFFIC 0000000000! dst 0, hdg 123` | ADS-B 模拟交通 | ✅ 正常仿真消息 |
+
+### 27.6 总结
+
+| 问题 | 答案 |
+|------|------|
+| ODOMETRY 刷屏原因 | onboard 模式发送 ODOMETRY@30Hz, type=8 被接收端拒绝 |
+| 是代码 bug 吗？ | ❌ PX4 设计如此（ONBOARD 面向 GCS，不面向飞控互连） |
+| 修复方法 | 改用 `-m custom` + `mavlink stream -s DEBUG_FLOAT_ARRAY -r 10` |
+| 需要改代码吗？ | ❌ 纯配置修改 |

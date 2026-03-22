@@ -491,8 +491,9 @@ trim = constrain(Kp × θ_hinge + Kd × dθ/dt, -TRIM_MAX, +TRIM_MAX)
 |------|-----|------|
 | 端口 | /dev/ttyS2 (TELEM2) | Pixhawk 串口 |
 | 波特率 | 921600 bps | 高速 MAVLink |
-| 模式 | onboard | DEBUG_FLOAT_ARRAY @ 10Hz |
-| 使能命令 | `mavlink start -d /dev/ttyS2 -b 921600 -m onboard` | - |
+| 模式 | **custom** | ⚠️ 不要用 onboard（ODOMETRY 刷屏） |
+| 启动命令 | `mavlink start -d /dev/ttyS2 -b 921600 -m custom` | 步骤 1 |
+| 添加流 | `mavlink stream -d /dev/ttyS2 -s DEBUG_FLOAT_ARRAY -r 10` | 步骤 2 |
 
 ### 15.3 超时与保护
 

@@ -194,20 +194,31 @@
 | **接收** (MAVLink → uORB) | `handle_message_debug_float_array()` | mavlink_receiver.cpp | 2813-2830 |
 | **接收** (uORB → 应用) | `_debug_array_sub.update()` | ChainwingSlave.cpp | 251 |
 
-### 3.3 ONBOARD 模式流配置
+### 3.3 MAVLink 模式选择：必须用 CUSTOM，不要用 ONBOARD
 
-`mavlink start -m onboard` 启动的 MAVLink 实例自动配置以下流：
+> ⚠️ **重要**: 多实例/硬件通信必须使用 `-m custom` 模式，**不要使用** `-m onboard`！
 
-```cpp
-// mavlink_main.cpp:1545-1606 — ONBOARD 模式
-configure_stream_local("ATTITUDE",              100.0f);
-configure_stream_local("ATTITUDE_QUATERNION",   50.0f);
-configure_stream_local("POSITION_TARGET_GLOBAL_INT", 10.0f);
-...
-configure_stream_local("DEBUG_FLOAT_ARRAY",     10.0f);  // ← 关键：10 Hz
-configure_stream_local("DEBUG",                 10.0f);
-configure_stream_local("DEBUG_VECT",            10.0f);
+**`-m onboard` 的问题**: 自动包含 ODOMETRY@30Hz 流。ODOMETRY.hpp 硬编码
+`estimator_type = MAV_ESTIMATOR_TYPE_AUTOPILOT (8)`，但 mavlink_receiver.cpp
+只接受 VISION/VIO/MOCAP/NAIVE 类型。两个实例互连后，每秒产生 **60 条**
+`WARN [mavlink] ODOMETRY: estimator_type 8 unsupported` 警告，刷屏导致无法操作。
+
+**正确做法**: 使用 `-m custom`（不配置任何流）+ 手动添加 `DEBUG_FLOAT_ARRAY` 流：
+
+```bash
+# 步骤 1: 启动 MAVLink 实例（custom 模式 = 空流）
+mavlink start -x -u 24550 -o 24551 -r 4000 -m custom
+
+# 步骤 2: 仅添加需要的流（10 Hz 足够铰链通信）
+mavlink stream -u 24550 -s DEBUG_FLOAT_ARRAY -r 10
 ```
+
+**对比**:
+
+| 模式 | ODOMETRY | DEBUG_FLOAT_ARRAY | 总流量 | 多实例安全 |
+|------|----------|-------------------|--------|-----------|
+| `-m onboard` | 30 Hz ❌ (刷屏) | 10 Hz | ~4000 B/s | ❌ |
+| `-m custom` + stream | 无 ✅ | 10 Hz | ~200 B/s | ✅ |
 
 **10 Hz 发送频率**意味着：
 - `chainwing_slave` 以 50 Hz 发布 `debug_array` uORB 消息
@@ -653,12 +664,16 @@ PX4_SYS_AUTOSTART=4008 PX4_SIM_MODEL=chainwing_3body PX4_GZ_WORLD=flat_terrain \
 
 #### 步骤 2：建立 UDP 通信链路
 
+> ⚠️ 必须使用 `-m custom`，**不要用** `-m onboard`（会导致 ODOMETRY 刷屏）
+
 ```
 # 实例 0 (pxh>)  — 主机
-pxh> mavlink start -x -u 24550 -o 24551 -r 4000 -m onboard
+pxh> mavlink start -x -u 24550 -o 24551 -r 4000 -m custom
+pxh> mavlink stream -u 24550 -s DEBUG_FLOAT_ARRAY -r 10
 
 # 实例 1 (pxh>)  — 从机
-pxh> mavlink start -x -u 24551 -o 24550 -r 4000 -m onboard
+pxh> mavlink start -x -u 24551 -o 24550 -r 4000 -m custom
+pxh> mavlink stream -u 24551 -s DEBUG_FLOAT_ARRAY -r 10
 pxh> param set CW_SLV_COMM_EN 1
 ```
 
@@ -667,7 +682,8 @@ pxh> param set CW_SLV_COMM_EN 1
 - `-u 24550`：本机监听 UDP 端口
 - `-o 24551`：对方接收 UDP 端口
 - `-r 4000`：速率 4000 B/s
-- `-m onboard`：使用 onboard 模式（含 DEBUG_FLOAT_ARRAY 流）
+- `-m custom`：空流模式（不含 ODOMETRY/ATTITUDE 等无用流）
+- `mavlink stream -s DEBUG_FLOAT_ARRAY -r 10`：仅添加铰链通信所需的流
 
 #### 步骤 3：从主机发送测试指令
 
@@ -762,20 +778,25 @@ CW_SLV_LP_FREQ = 10.0  # 低通滤波频率
 
 ### 8.6 启动 MAVLink 串口通信
 
+> ⚠️ 使用 `-m custom` 模式，不要用 `-m onboard`（会导致 ODOMETRY 刷屏）
+
 ```
 # 从机 PX4 Shell (通过 QGC MAVLink Console 或 nsh)
-pxh> mavlink start -d /dev/ttyS2 -b 921600 -m onboard
+pxh> mavlink start -d /dev/ttyS2 -b 921600 -m custom
+pxh> mavlink stream -d /dev/ttyS2 -s DEBUG_FLOAT_ARRAY -r 10
 ```
 
 参数说明：
 - `-d /dev/ttyS2`：TELEM2 串口设备
 - `-b 921600`：波特率 921600 bps
-- `-m onboard`：onboard 模式，自动包含 DEBUG_FLOAT_ARRAY 流
+- `-m custom`：空流模式，避免发送 ODOMETRY 等无用消息
+- `mavlink stream`：仅添加 DEBUG_FLOAT_ARRAY 流（10 Hz，铰链通信）
 
 **如需永久生效**，在机架文件最后添加：
 ```bash
 # 在 chainwing_slave start 之前
-mavlink start -d /dev/ttyS2 -b 921600 -m onboard
+mavlink start -d /dev/ttyS2 -b 921600 -m custom
+mavlink stream -d /dev/ttyS2 -s DEBUG_FLOAT_ARRAY -r 10
 chainwing_slave start
 ```
 
@@ -835,8 +856,9 @@ pxh> listener debug_array -n 5
 | 4 | 通信使能 | `param set CW_SLV_COMM_EN 1` | 无错误 | □ |
 | 5 | debug_array 发布 | `listener debug_array` | 看到 id=42 | □ |
 | 6 | hinge_status 发布 | `listener chainwing_hinge_status` | 看到数据 | □ |
-| 7 | MAVLink 启动 | `mavlink start -d ... -m onboard` | 无错误 | □ |
-| 8 | MAVLink 状态 | `mavlink status` | 显示 onboard 实例 | □ |
+| 7 | MAVLink 启动 | `mavlink start -d ... -m custom` | 无错误 | □ |
+| 7b | 添加流 | `mavlink stream -d ... -s DEBUG_FLOAT_ARRAY -r 10` | 无错误 | □ |
+| 8 | MAVLink 状态 | `mavlink status` | 显示 custom 实例 | □ |
 | 9 | 串口收发 | `mavlink status` → rate rx | rx > 0 B/s | □ |
 | 10 | 日志记录 | 飞行后检查 .ulg | 含 chainwing_hinge_status | □ |
 

@@ -220,16 +220,23 @@ param set-default CW_SLV_COMM_EN 0
 # ==============================================================
 # Inter-Controller Communication (UART + MAVLink)
 # ==============================================================
-# Hardware: mavlink start -d /dev/ttyS2 -b 921600 -m onboard
-# SITL:     Uses UDP port; uncomment below for multi-instance test
+# ⚠️ 必须使用 -m custom 模式，不要用 -m onboard！
+#    onboard 模式包含 ODOMETRY@30Hz 流，会导致
+#    "ODOMETRY: estimator_type 8 unsupported" 刷屏。
 #
 # For SITL multi-instance communication test (2 PX4 instances):
-#   Instance 0 (master): mavlink start -x -u 24550 -o 24551 -r 4000 -m onboard
-#   Instance 1 (slave):  mavlink start -x -u 24551 -o 24550 -r 4000 -m onboard
+#   Instance 0 (master):
+#     mavlink start -x -u 24550 -o 24551 -r 4000 -m custom
+#     mavlink stream -u 24550 -s DEBUG_FLOAT_ARRAY -r 10
+#   Instance 1 (slave):
+#     mavlink start -x -u 24551 -o 24550 -r 4000 -m custom
+#     mavlink stream -u 24551 -s DEBUG_FLOAT_ARRAY -r 10
+#     param set CW_SLV_COMM_EN 1
 #
-# To enable for hardware verification:
+# For hardware verification (UART):
+#   mavlink start -d /dev/ttyS2 -b 921600 -m custom
+#   mavlink stream -d /dev/ttyS2 -s DEBUG_FLOAT_ARRAY -r 10
 #   param set CW_SLV_COMM_EN 1
-#   mavlink start -d /dev/ttyS2 -b 921600 -m onboard
 
 # Auto-start the chainwing_slave module
 chainwing_slave start
