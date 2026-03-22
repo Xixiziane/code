@@ -462,7 +462,7 @@ void ChainwingSlave::updateHingeEstimate(float dt)
 
     // 2. 初始化参考姿态（首次有效姿态时）
     if (!_ref_initialized && attitude_valid) {
-        _pitch_ref = euler.theta();
+        _roll_ref = euler.phi();  // hinge axis = X = roll
         _ref_initialized = true;
     }
 
@@ -478,8 +478,8 @@ void ChainwingSlave::updateHingeEstimate(float dt)
 
     // 5. 互补滤波：姿态修正长期漂移
     const float cf_alpha = 0.02f;
-    _hinge_angle_left  = (1-cf_alpha)*_hinge_angle_left  + cf_alpha*pitch_error;
-    _hinge_angle_right = (1-cf_alpha)*_hinge_angle_right + cf_alpha*(-pitch_error);
+    _hinge_angle_left  = (1-cf_alpha)*_hinge_angle_left  + cf_alpha*roll_error;
+    _hinge_angle_right = (1-cf_alpha)*_hinge_angle_right + cf_alpha*(-roll_error);
 }
 ```
 

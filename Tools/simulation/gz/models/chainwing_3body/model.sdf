@@ -12,19 +12,19 @@
   - T_max = 15.0 N per motor, motorConstant = 1.5e-05
   - alpha_0 = -0.05 rad, CLA = 5.25 /rad, CDA = 0.65
 
-  Hinge joint parameters (high stiffness, NOT free hinge):
-  - spring_stiffness = 500 N·m/rad (stiff connection)
-  - damping = 50 N·m·s/rad (high damping for near-rigid behavior)
-  - limits = ±5 deg = ±0.087 rad
-  - Axis: X (longitudinal) — allows relative pitch between units
+  Hinge joint parameters (redesigned from report.pdf §3.2.1):
+  - spring_stiffness = 200 N·m/rad (frequency-matched from polyurethane)
+  - damping = 12 N·m·s/rad (ζ≈0.51, slightly underdamped)
+  - limits = ±15 deg = ±0.262 rad
+  - Axis: X (longitudinal) — allows relative roll between units
 
   Actuator mapping (matching 4008_gz_chainwing_3body airframe):
     Motor 0 (ESC1): left unit pusher    - command/motor_speed motorNumber=0
     Motor 1 (ESC2): center unit pusher  - command/motor_speed motorNumber=1
     Motor 2 (ESC3): right unit pusher   - command/motor_speed motorNumber=2
-    Servo 0 (SV1):  left unit elevon    - servo_0 (reversed, used for slave pitch trim)
+    Servo 0 (SV1):  left unit elevon    - servo_0 (reversed, used for slave roll trim)
     Servo 1 (SV2):  center elevator     - servo_1 (master pitch control)
-    Servo 2 (SV3):  right unit elevon   - servo_2 (reversed, used for slave pitch trim)
+    Servo 2 (SV3):  right unit elevon   - servo_2 (reversed, used for slave roll trim)
 -->
 <sdf version='1.9'>
   <model name='chainwing_3body'>
@@ -493,11 +493,11 @@
 
     <!-- ==================== HINGE JOINTS (HIGH STIFFNESS) ==================== -->
     <!--
-      Wing-tip hinge connection: NOT a free hinge.
-      High stiffness (500 N·m/rad) + high damping (50 N·m·s/rad)
-      simulates the semi-rigid connection described by the user.
-      The joint allows small relative pitch (±5°) between units.
-      Axis: X (longitudinal/forward) — relative pitch rotation.
+      Wing-tip hinge connection: semi-rigid polyurethane elastic elements.
+      Stiffness (200 N·m/rad) + damping (12 N·m·s/rad)
+      derived from report.pdf §3.2.1 with frequency-matching scaling.
+      The joint allows small relative roll (±15°) between units.
+      Axis: X (longitudinal/forward) — relative roll rotation.
     -->
     <joint name='hinge_left' type='revolute'>
       <parent>base_link</parent>
@@ -863,7 +863,7 @@
     </joint>
 
     <!-- ==================== CONTROL SURFACES ==================== -->
-    <!-- Servo 0: Left unit elevon (on left_unit — used for slave pitch trim) -->
+    <!-- Servo 0: Left unit elevon (on left_unit — used for slave roll trim) -->
     <link name="left_elevon">
       <inertial>
         <mass>0.00000001</mass>
@@ -959,7 +959,7 @@
       </physics>
     </joint>
 
-    <!-- Servo 2: Right unit elevon (on right_unit — used for slave pitch trim) -->
+    <!-- Servo 2: Right unit elevon (on right_unit — used for slave roll trim) -->
     <link name="right_elevon">
       <inertial>
         <mass>0.00000001</mass>

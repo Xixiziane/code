@@ -92,7 +92,7 @@ PARAM_DEFINE_FLOAT(CW_SLV_KD, 0.2f);
  * The remaining travel is used for the master's overall pitch command.
  *
  * At 30% travel (0.3), the elevon generates approximately 24.6 N·m
- * of pitch moment, sufficient for correcting hinge deflections up to ±10°.
+ * of aerodynamic moment, sufficient for correcting hinge roll deflections up to ±10°.
  *
  * @min 0.0
  * @max 1.0
