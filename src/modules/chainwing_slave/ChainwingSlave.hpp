@@ -36,15 +36,15 @@
  *
  * Chain-wing slave controller module.
  *
- * Estimates relative hinge angle between master and slave units using
- * IMU integration, and computes elevator trim corrections to maintain
+ * Estimates relative hinge angle (roll axis) between master and slave units
+ * using IMU integration, and computes elevon trim corrections to maintain
  * coplanarity. In simulation, reads hinge joint angles directly from
  * the Gazebo joint state topic.
  *
  * Communication with master controller via UART + MAVLink protocol:
- *   - Master sends overall pitch/throttle commands
+ *   - Master sends overall pitch/throttle/roll commands
  *   - Slave applies: δ_total = δ_master + δ_trim
- *   - δ_trim = Kp * θ_hinge + Kd * θ̇_hinge
+ *   - δ_trim = Kp * θ_hinge + Kd * θ̇_hinge  (hinge = relative roll)
  */
 
 #pragma once
@@ -160,7 +160,7 @@ private:
 	bool _master_cmd_valid{false};   ///< True if master command received within timeout
 
 	// Reference attitude (captured at startup for IMU integration baseline)
-	float _pitch_ref{0.0f};
+	float _roll_ref{0.0f};       ///< Initial roll angle reference (hinge axis = X = roll)
 	bool  _ref_initialized{false};
 
 	// Previous timestamp for dt calculation

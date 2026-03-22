@@ -1,6 +1,6 @@
 # 链翼无人机主从机通信系统技术文档
 
-> **版本**: v1.0  
+> **版本**: v2.0  
 > **日期**: 2026-03-22  
 > **项目**: PX4_test — 链翼（Chain-Wing）三体固定翼无人机  
 > **范围**: 完整项目概述 + 主从机 UART+MAVLink 通信方式 + 验证步骤
@@ -21,6 +21,7 @@
 - [§10 Logger 飞行日志记录](#10-logger-飞行日志记录)
 - [§11 文件清单](#11-文件清单)
 - [§12 故障排除](#12-故障排除)
+- [§13 修改历史记录](#13-修改历史记录)
 
 ---
 
@@ -40,7 +41,7 @@
 ```
 
 - **主机（Master, base_link）**：运行标准 PX4 固定翼控制栈，负责整体姿态和航线
-- **从机（Slave, left_unit / right_unit）**：运行 `chainwing_slave` 模块，通过 PD 控制器调整升降舵修正量，保持与主机的共面性
+- **从机（Slave, left_unit / right_unit）**：运行 `chainwing_slave` 模块，通过 PD 控制器调整 elevon 修正量，保持与主机的共面性（修正**相对滚转**）
 
 ### 1.2 物理参数
 
@@ -110,7 +111,7 @@
 │         │                     ▼                         │      │
 │         │              ┌──────────────┐          ┌─────┴────┐ │
 │         │              │ GZ Servo 0/1/2│          │chainwing │ │
-│         │              │ (升降舵+修正) │          │_slave    │ │
+│         │              │ (elevon+修正) │          │_slave    │ │
 │         │              └──────────────┘          │(铰链PD)  │ │
 │         │                                        └──────────┘ │
 │         ▼                                                      │
@@ -127,7 +128,7 @@
 
 1. 它 **不替代** 标准 PX4 飞控栈中的任何模块
 2. 它 **额外计算** 铰链角度偏差的修正量 (`trim_left`, `trim_right`)
-3. `GZMixingInterfaceServo` 在输出伺服信号时，将修正量 **叠加** 到左/右升降舵上：
+3. `GZMixingInterfaceServo` 在输出伺服信号时，将修正量 **叠加** 到左/右 elevon 上：
 
 ```
 δ_total = clamp(δ_main + δ_trim, -1.0, 1.0)
@@ -164,7 +165,7 @@
 1. **零驱动开发**：PX4 已有完整的 uORB ↔ MAVLink 自动桥接
 2. **容量充足**：每包 58 个 float，远超我们需要的 7 个（铰链）+ 3 个（指令）
 3. **双向通信**：发送端 publish `debug_array` uORB → MAVLink 自动发出；接收端 MAVLink 收到 → 自动 publish `debug_array` uORB
-4. **内置流控**：`onboard` 模式默认 10 Hz 发送，足够 50 Hz 控制环使用
+4. **内置流控**：`custom` 模式 + `mavlink stream -s DEBUG_FLOAT_ARRAY -r 10` 精确控制速率
 
 ### 3.2 PX4 内置桥接机制
 
@@ -1033,3 +1034,92 @@ pxh> uorb top       # 查看 uORB 话题发布频率
 > 本文档完整描述了链翼无人机主从机通信系统的设计、实现和验证方法。
 > 所有代码均基于 PX4 内置的 DEBUG_FLOAT_ARRAY MAVLink 消息桥接机制，
 > 零自定义驱动开发，可直接用于串口+MAVLink 硬件通信验证。
+
+---
+
+## §13 修改历史记录
+
+### 13.1 铰链参数三次迭代
+
+| 版本 | 日期 | 刚度 k (N·m/rad) | 阻尼 c (N·m·s/rad) | 极限 | Kp | Kd | 结果 |
+|------|------|:--:|:--:|:--:|:--:|:--:|------|
+| v1（初始） | 2026-03-20 | 500 | 50 | ±5° | 0.3 | 0.05 | ❌ 弹簧太硬，控制器仅4.9%作用 |
+| v2（首次优化） | 2026-03-22 | 50 | 5 | ±10° | 2.0 | 0.3 | ❌ ωn=1.36Hz与控制器耦合，飞行不稳 |
+| **v3（当前）** | 2026-03-22 | **200** | **12** | **±15°** | **1.5** | **0.2** | ⏳ ωn=2.72Hz，ζ=0.51，控制器占38% |
+
+**v3 推导依据**：report.pdf §3.2.1 聚氨酯弹性体物理参数 + 频率匹配缩放法。
+
+### 13.2 MAVLink 模式修正
+
+| 修改 | 原值 | 新值 | 原因 |
+|------|------|------|------|
+| MAVLink 模式 | `-m onboard` | `-m custom` | onboard 含 ODOMETRY@30Hz，estimator_type=8 被拒绝，产生刷屏警告 |
+| 流配置 | 无（依赖默认） | `mavlink stream -s DEBUG_FLOAT_ARRAY -r 10` | 仅发送需要的数据流 |
+
+**根因**：`ODOMETRY.hpp:140` 硬编码 `MAV_ESTIMATOR_TYPE_AUTOPILOT(8)`，`mavlink_receiver.cpp:1429-1453` 不支持该类型。
+
+**正确命令**：
+```bash
+# SITL 多实例
+mavlink start -x -u 24550 -o 24551 -r 4000 -m custom
+mavlink stream -u 24550 -s DEBUG_FLOAT_ARRAY -r 10
+
+# 硬件 UART
+mavlink start -d /dev/ttyS2 -b 921600 -m custom
+mavlink stream -d /dev/ttyS2 -s DEBUG_FLOAT_ARRAY -r 10
+```
+
+### 13.3 模块自启动
+
+| 修改 | 文件 | 说明 |
+|------|------|------|
+| 添加 `chainwing_slave start` | 4008_gz_chainwing_3body:228 | 模块随机架文件自动启动，无需手动输入 |
+| 添加 `chainwing_hinge_status` | logged_topics.cpp:57 | 铰链状态自动记录到 .ulg 飞行日志 |
+
+### 13.4 术语修正：滚转 vs 俯仰
+
+| 修改前（错误） | 修改后（正确） | 说明 |
+|--------|--------|------|
+| 相对俯仰旋转 | **相对滚转旋转** | 铰链轴=X(前向)=滚转轴，绕X旋转=滚转 |
+| 铰链角=从机俯仰角-主机俯仰角 | **铰链角=从机滚转角-主机滚转角** | 铰链检测的是滚转差异 |
+| 互补滤波器用 euler.theta() (pitch) | **euler.phi() (roll)** | 代码BUG修复：使用正确的欧拉角分量 |
+| _pitch_ref | **_roll_ref** | 变量重命名反映真实物理含义 |
+
+**物理解释**：
+
+```
+铰链轴 = model.sdf <xyz>1 0 0</xyz> = X轴（前向/纵轴）
+航空学定义：绕X轴旋转 = 滚转（Roll）
+         绕Y轴旋转 = 俯仰（Pitch）
+         绕Z轴旋转 = 偏航（Yaw）
+
+因此：铰链允许的是 "相对滚转"，不是 "相对俯仰"
+IMU 测量到的 angular_vel.xyz[0] = roll_rate → 正确
+互补滤波器应该用 euler.phi() (roll) → 已修正
+```
+
+### 13.5 CW 模块关闭行为确认
+
+当 `CW_SLV_EN=0` 时：
+1. `ChainwingSlave::Run()` 立即返回（line 88-91）
+2. 不发布 `chainwing_hinge_status`
+3. `GZMixingInterfaceServo` 的 `copy()` 返回 false → `hinge_valid=false`
+4. trim 修正块被跳过 → 舵面输出纯控制分配器值
+
+**结论**：关闭 CW 模块 = 修正完全不起作用，舵面为标准 PX4 输出。
+
+### 13.6 v2.0 更新汇总
+
+| 变更类型 | 文件 | 描述 |
+|----------|------|------|
+| **BUG修复** | ChainwingSlave.cpp | 互补滤波器 theta()→phi()，pitch→roll |
+| **BUG修复** | ChainwingSlave.hpp | _pitch_ref → _roll_ref |
+| **BUG修复** | ChainwingHingeStatus.msg | 注释：elevator→elevon, nose up→relative roll |
+| 参数优化 | model.sdf | k=500→200, c=50→12, ±5°→±15° |
+| 参数优化 | chainwing_slave_params.c | KP=0.3→1.5, KD=0.05→0.2 |
+| 功能新增 | ChainwingSlave.cpp | MAVLink DEBUG_FLOAT_ARRAY 通信接口 |
+| 功能新增 | chainwing_slave_params.c | CW_SLV_COMM_EN 参数 |
+| 配置修复 | 4008_gz_chainwing_3body | chainwing_slave start 自启动 |
+| 配置修复 | logged_topics.cpp | chainwing_hinge_status 日志记录 |
+| 术语修正 | 全部文档 | 相对俯仰 → 相对滚转 |
+| MAVLink修复 | 文档+注释 | -m onboard → -m custom |

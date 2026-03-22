@@ -38,12 +38,12 @@
  * and computes elevator trim corrections to maintain coplanarity between
  * master and slave units.
  *
- * Control law:
- *   δ_trim = Kp × θ_hinge + Kd × θ̇_hinge
+ * Control law (corrects relative ROLL between wing units):
+ *   δ_trim = Kp × θ_hinge + Kd × θ̇_hinge  (hinge axis = X = roll)
  *   δ_total = clamp(δ_master + δ_trim, -1.0, 1.0)
  *
  * Communication architecture (hardware):
- *   Master → Slave: UART + MAVLink v2 (overall pitch/throttle commands)
+ *   Master → Slave: UART + MAVLink v2 (overall pitch/throttle/roll commands)
  *   Slave → Master: UART + MAVLink v2 (hinge status feedback)
  *
  * In simulation (GZ SITL):
@@ -142,18 +142,18 @@ void ChainwingSlave::updateHingeEstimate(float dt)
 	bool attitude_valid = _vehicle_attitude_sub.copy(&attitude);
 
 	// Extract roll rate (X-axis in body frame).
-	// The hinge axis is aligned with X (forward direction), so relative pitch
+	// The hinge axis is aligned with X (forward direction), so relative ROLL
 	// rotation between units around the hinge is sensed as roll rate by the IMU.
 	const float roll_rate = angular_vel.xyz[0];
 
 	// Initialize reference on first valid attitude
 	if (!_ref_initialized && attitude_valid) {
-		// Extract pitch from quaternion
+		// Extract roll from quaternion (hinge axis = X = roll axis)
 		const matrix::Quatf q(attitude.q);
 		const matrix::Eulerf euler(q);
-		_pitch_ref = euler.theta();
+		_roll_ref = euler.phi();
 		_ref_initialized = true;
-		PX4_INFO("Slave reference pitch initialized: %.2f deg", (double)math::degrees(_pitch_ref));
+		PX4_INFO("Slave reference roll initialized: %.2f deg", (double)math::degrees(_roll_ref));
 	}
 
 	if (!_ref_initialized) {
@@ -166,8 +166,8 @@ void ChainwingSlave::updateHingeEstimate(float dt)
 
 	// IMU integration method for relative hinge angle estimation:
 	// In a real multi-controller setup, each slave has its own IMU.
-	// The master sends its pitch via MAVLink.
-	// Relative angle = slave_pitch - master_pitch.
+	// The master sends its roll via MAVLink.
+	// Relative hinge angle = slave_roll - master_roll (rotation around X-axis).
 	//
 	// In single-instance simulation, we estimate from roll rate
 	// (the hinge axis is approximately the X/forward axis).
@@ -189,18 +189,18 @@ void ChainwingSlave::updateHingeEstimate(float dt)
 	_hinge_angle_left = decay * (_hinge_angle_left + _hinge_rate_left * dt);
 	_hinge_angle_right = decay * (_hinge_angle_right + _hinge_rate_right * dt);
 
-	// Attitude-based correction: if we have valid attitude, use pitch deviation
+	// Attitude-based correction: if we have valid attitude, use roll deviation
 	// from reference as a coarse hinge angle estimate (complementary filter)
 	if (attitude_valid) {
 		const matrix::Quatf q(attitude.q);
 		const matrix::Eulerf euler(q);
-		const float pitch_error = euler.theta() - _pitch_ref;
+		const float roll_error = euler.phi() - _roll_ref;
 
 		// Blend IMU-integrated angle with attitude-based estimate
 		// This corrects long-term drift while keeping high-frequency response
 		const float cf_alpha = 0.02f; // complementary filter weight (low = trust integration more)
-		_hinge_angle_left = (1.0f - cf_alpha) * _hinge_angle_left + cf_alpha * pitch_error;
-		_hinge_angle_right = (1.0f - cf_alpha) * _hinge_angle_right + cf_alpha * (-pitch_error);
+		_hinge_angle_left = (1.0f - cf_alpha) * _hinge_angle_left + cf_alpha * roll_error;
+		_hinge_angle_right = (1.0f - cf_alpha) * _hinge_angle_right + cf_alpha * (-roll_error);
 	}
 }
 
