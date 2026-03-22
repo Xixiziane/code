@@ -198,11 +198,15 @@ param set-default CBRK_SUPPLY_CHK 894281
 # Enable slave controller for hinge position trim
 param set-default CW_SLV_EN 1
 
-# PD controller gains for hinge correction (updated per §25 analysis)
-# Kp=2.0: at 10° deflection, trim = Kp * (10*pi/180) = 0.349 (~35%)
-# Kd=0.3: matched damping for ζ≈1.0 with k=50 N·m/rad
-param set-default CW_SLV_KP 2.0
-param set-default CW_SLV_KD 0.3
+# PD controller gains for hinge correction (redesigned from report.pdf §3.2.1)
+# Physical basis: polyurethane elastic elements, ±45° roll freedom
+# Scaled from report: 0.5kg→1.9kg (3.8×), 0.6m→1.2m (2×), 15→20 m/s
+# k=200 N·m/rad → ωn=17.1 rad/s (2.72 Hz) — above PX4 attitude ctrl bandwidth
+# Kp=1.5: at 5° deflection, trim=0.131 (13%), controller contributes 38%
+# Kd=0.2: provides additional ζ≈0.1 active damping on top of passive ζ=0.51
+# Full derivation: CHAINWING_PARAMETER_REFERENCE.md §3.3
+param set-default CW_SLV_KP 1.5
+param set-default CW_SLV_KD 0.2
 
 # Max trim = 30% travel, provides 24.6 N·m correction moment
 param set-default CW_SLV_TRIM_MAX 0.3
