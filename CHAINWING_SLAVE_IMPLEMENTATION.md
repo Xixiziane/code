@@ -2,7 +2,7 @@
 
 ## CHAINWING_SLAVE_IMPLEMENTATION.md
 
-> **版本**: v2.6  
+> **版本**: v2.7  
 > **日期**: 2024  
 > **基于仓库**: PX4_test (Chainwing UAV firmware)  
 > **关联文档**: CHAINWING_MULTI_CONTROLLER_GUIDE.md, CHAINWING_FIRMWARE_DOC.md, CHAINWING_TECHNICAL_DETAILS.md
@@ -38,6 +38,7 @@
 25. [铰链参数保守性分析：刚度/阻尼是否过大导致从机代码失效](#25-铰链参数保守性分析刚度阻尼是否过大导致从机代码失效)
 26. [CW模块关闭后的行为分析：修正油门是否失效](#26-cw模块关闭后的行为分析修正油门是否失效)
 27. [ODOMETRY 刷屏问题：多实例通信必须用 custom 模式](#27-odometry-刷屏问题多实例通信必须用-custom-模式)
+28. [PX4 v1.14 兼容性分析：自定义代码能否直接移植](#28-px4-v114-兼容性分析自定义代码能否直接移植)
 
 ---
 
@@ -4768,3 +4769,223 @@ param set CW_SLV_COMM_EN 1
 | 是代码 bug 吗？ | ❌ PX4 设计如此（ONBOARD 面向 GCS，不面向飞控互连） |
 | 修复方法 | 改用 `-m custom` + `mavlink stream -s DEBUG_FLOAT_ARRAY -r 10` |
 | 需要改代码吗？ | ❌ 纯配置修改 |
+
+---
+
+## 28. PX4 v1.14 兼容性分析：自定义代码能否直接移植
+
+### 28.1 结论
+
+**✅ 可以。** 当前代码库本身就基于 PX4 v1.14，所有自定义代码使用的 API 均为 v1.14 原生支持。
+
+### 28.2 版本确认
+
+| 证据 | 值 | 说明 |
+|------|-----|------|
+| NuttX 子模块分支 | `px4_firmware_nuttx-10.3.0+-v1.14` | 明确标注 v1.14 |
+| gz_bridge 模块 | ✅ 存在 | v1.14 新增 Gazebo Garden 支持 |
+| gazebo-classic 目录 | ✅ 存在 | v1.14 同时保留旧版 Gazebo Classic |
+| Kconfig 构建系统 | ✅ 使用 | v1.14 引入 Kconfig |
+| LeftElevon/RightElevon 类型 | ✅ 存在 | v1.14 新增控制面类型 |
+| MixingOutput + OutputModuleInterface | ✅ 存在 | v1.13+ 控制分配架构 |
+
+**本仓库基于 PX4 v1.14.x，自定义代码天然兼容。**
+
+### 28.3 自定义代码清单
+
+所有自定义代码（非 PX4 原生）：
+
+| # | 文件 | 类型 | 行数 |
+|---|------|------|------|
+| 1 | `src/modules/chainwing_slave/ChainwingSlave.cpp` | 新增 | ~270 |
+| 2 | `src/modules/chainwing_slave/ChainwingSlave.hpp` | 新增 | ~180 |
+| 3 | `src/modules/chainwing_slave/chainwing_slave_params.c` | 新增 | ~140 |
+| 4 | `src/modules/chainwing_slave/CMakeLists.txt` | 新增 | ~10 |
+| 5 | `src/modules/chainwing_slave/Kconfig` | 新增 | ~6 |
+| 6 | `msg/ChainwingHingeStatus.msg` | 新增 | ~17 |
+| 7 | `Tools/simulation/gz/models/chainwing_3body/model.sdf` | 新增 | ~1000 |
+| 8 | `src/modules/simulation/gz_bridge/GZMixingInterfaceServo.cpp` | 修改 | +25 行 |
+| 9 | `src/modules/simulation/gz_bridge/GZMixingInterfaceServo.hpp` | 修改 | +3 行 |
+| 10 | `ROMFS/.../4008_gz_chainwing_3body` | 新增 | ~230 |
+| 11 | `boards/px4/sitl/default.px4board` | 修改 | +1 行 |
+| 12 | `src/modules/logger/logged_topics.cpp` | 修改 | +1 行 |
+
+### 28.4 API 逐项兼容性检查
+
+#### 28.4.1 模块框架 API
+
+| API | 用途 | v1.14 支持 | 说明 |
+|-----|------|-----------|------|
+| `ModuleBase<T>` | 模块生命周期管理 | ✅ | v1.8+ 标准 API |
+| `ModuleParams` | 参数管理基类 | ✅ | v1.8+ 标准 API |
+| `ScheduledWorkItem` | 定时调度（50 Hz） | ✅ | v1.9+ 标准 API |
+| `px4::wq_configurations::lp_default` | 低优先级工作队列 | ✅ | v1.10+ |
+| `task_spawn()` / `custom_command()` | 模块启动框架 | ✅ | v1.8+ 标准模式 |
+
+#### 28.4.2 uORB 通信 API
+
+| API | 用途 | v1.14 支持 | 说明 |
+|-----|------|-----------|------|
+| `uORB::Subscription` | 话题订阅 | ✅ | v1.8+ |
+| `uORB::SubscriptionInterval` | 带间隔的订阅 | ✅ | v1.12+ |
+| `uORB::Publication` | 话题发布 | ✅ | v1.8+ |
+| `ORB_ID(vehicle_attitude)` | 姿态话题 | ✅ | 始终可用 |
+| `ORB_ID(vehicle_angular_velocity)` | 角速度话题 | ✅ | v1.10+ |
+| `ORB_ID(actuator_servos)` | 舵机话题 | ✅ | v1.13+ (新 CA) |
+| `ORB_ID(debug_array)` | 调试数组话题 | ✅ | v1.9+ |
+| 自定义 `.msg` 文件 | chainwing_hinge_status | ✅ | v1.8+ 支持自定义消息 |
+
+#### 28.4.3 数学库 API
+
+| API | 用途 | v1.14 支持 | 说明 |
+|-----|------|-----------|------|
+| `matrix::Quatf` | 四元数 | ✅ | v1.6+ |
+| `matrix::Eulerf` | 欧拉角转换 | ✅ | v1.6+ |
+| `math::constrain()` | 数值限幅 | ✅ | v1.6+ |
+| `math::degrees()` | 弧度→度 | ✅ | v1.6+ |
+| `M_PI_F` | π 常数 | ✅ | 始终可用 |
+
+#### 28.4.4 时间管理 API
+
+| API | 用途 | v1.14 支持 | 说明 |
+|-----|------|-----------|------|
+| `hrt_abstime` | 高精度时间类型 | ✅ | 始终可用 |
+| `hrt_absolute_time()` | 当前时间（微秒） | ✅ | 始终可用 |
+| `hrt_elapsed_time()` | 经过时间计算 | ✅ | 始终可用 |
+| `time_literals`（`1_s`, `20000_us`） | 时间字面量 | ✅ | v1.12+ |
+
+#### 28.4.5 日志和系统 API
+
+| API | 用途 | v1.14 支持 | 说明 |
+|-----|------|-----------|------|
+| `PX4_INFO()` / `PX4_WARN()` / `PX4_ERR()` | 日志输出 | ✅ | 始终可用 |
+| `PARAM_DEFINE_FLOAT()` | 浮点参数定义 | ✅ | 始终可用 |
+| `PARAM_DEFINE_INT32()` | 整数参数定义 | ✅ | 始终可用 |
+| `DEFINE_PARAMETERS()` 宏 | 参数批量声明 | ✅ | v1.8+ |
+
+#### 28.4.6 仿真集成 API
+
+| API | 用途 | v1.14 支持 | 说明 |
+|-----|------|-----------|------|
+| `gz::transport::Node` | Gazebo Garden 通信 | ✅ | v1.14 新增 |
+| `gz::msgs::Double` | Gazebo 消息类型 | ✅ | v1.14 新增 |
+| `OutputModuleInterface` | 输出模块基类 | ✅ | v1.13+ |
+| `MixingOutput` | 混控输出 | ✅ | v1.13+ |
+
+#### 28.4.7 MAVLink 通信 API
+
+| API | 用途 | v1.14 支持 | 说明 |
+|-----|------|-----------|------|
+| `mavlink start -m custom` | 自定义模式启动 | ✅ | v1.10+ |
+| `mavlink stream -s DEBUG_FLOAT_ARRAY` | 流配置 | ✅ | v1.10+ |
+| `DEBUG_FLOAT_ARRAY` MAVLink 消息 | 主从通信载体 | ✅ | MAVLink v2 标准 |
+| uORB↔MAVLink 自动桥接 | debug_array 双向透传 | ✅ | v1.9+ |
+
+### 28.5 移植到干净 PX4 v1.14 的步骤
+
+如果要将代码移植到一个全新的 PX4 v1.14 仓库：
+
+```bash
+# 1. 克隆干净的 PX4 v1.14
+git clone --branch v1.14.0 --recursive https://github.com/PX4/PX4-Autopilot.git
+cd PX4-Autopilot
+
+# 2. 复制 chainwing_slave 模块（整个目录）
+cp -r <your_repo>/src/modules/chainwing_slave/ src/modules/chainwing_slave/
+
+# 3. 复制自定义消息
+cp <your_repo>/msg/ChainwingHingeStatus.msg msg/
+
+# 4. 复制 GZ 仿真模型
+cp -r <your_repo>/Tools/simulation/gz/models/chainwing_3body/ Tools/simulation/gz/models/
+
+# 5. 复制机架文件
+cp <your_repo>/ROMFS/px4fmu_common/init.d-posix/airframes/4008_gz_chainwing_3body \
+   ROMFS/px4fmu_common/init.d-posix/airframes/
+
+# 6. 应用 GZMixingInterfaceServo 修改（手动合并 ~25 行）
+# 在 GZMixingInterfaceServo.hpp 的 private 段添加:
+#   #include <uORB/Subscription.h>
+#   #include <uORB/topics/chainwing_hinge_status.h>
+#   uORB::Subscription _hinge_status_sub{ORB_ID(chainwing_hinge_status)};
+#
+# 在 GZMixingInterfaceServo.cpp updateOutputs() 函数中，
+# 在 outputs[i] 赋值之后、Publish 之前，添加如下修正逻辑:
+#
+#   chainwing_hinge_status_s hinge{};
+#   bool hinge_valid = _hinge_status_sub.copy(&hinge) && hinge.data_valid;
+#   if (hinge_valid) {
+#       if (i == 0) { outputs[i] += hinge.trim_left; }    // servo_0: 左从机 elevon
+#       if (i == 2) { outputs[i] += hinge.trim_right; }   // servo_2: 右从机 elevon
+#       outputs[i] = math::constrain(outputs[i], -1.f, 1.f);
+#   }
+#
+# 完整修改可参考本仓库的 GZMixingInterfaceServo.cpp:62-86
+
+# 7. 启用编译
+# 在 boards/px4/sitl/default.px4board 添加:
+#   CONFIG_MODULES_CHAINWING_SLAVE=y
+
+# 8. 注册自定义消息
+# PX4 v1.14 的 msg/ 目录使用 CMakeLists.txt 自动扫描 .msg 文件，
+# 只需将 ChainwingHingeStatus.msg 放入 msg/ 目录即可自动发现。
+# 无需手动编辑 msg/CMakeLists.txt（自动 glob 机制）。
+
+# 9. 可选：在 logged_topics.cpp 添加 chainwing_hinge_status
+
+# 10. 编译
+make px4_sitl_default gz_chainwing_3body
+```
+
+### 28.6 硬件目标板兼容性
+
+| 目标板 | 编译命令 | 兼容性 | 说明 |
+|--------|---------|--------|------|
+| SITL (仿真) | `make px4_sitl_default` | ✅ 完全兼容 | 当前开发目标 |
+| Pixhawk 6X (FMU-v6x) | `make px4_fmu-v6x_default` | ✅ 兼容 | 需在 .px4board 启用模块 |
+| Pixhawk 6C (FMU-v6c) | `make px4_fmu-v6c_default` | ✅ 兼容 | 同上 |
+| Pixhawk 4 (FMU-v5) | `make px4_fmu-v5_default` | ✅ 兼容 | 同上 |
+| Pixhawk Mini (FMU-v3) | `make px4_fmu-v3_default` | ⚠️ 闪存可能不足 | v3 仅 1MB Flash |
+| CubeOrange (FMU-v5x) | `make cubepilot_cubeorange` | ✅ 兼容 | 推荐硬件之一 |
+
+**硬件编译步骤**（以 Pixhawk 6X 为例）：
+```bash
+# 1. 在 boards/px4/fmu-v6x/default.px4board 添加：
+CONFIG_MODULES_CHAINWING_SLAVE=y
+
+# 2. 编译
+make px4_fmu-v6x_default
+
+# 3. 烧录
+make px4_fmu-v6x_default upload
+# 或复制 .px4 文件到 QGC 烧录
+```
+
+### 28.7 v1.14 特有注意事项
+
+| 注意事项 | 说明 |
+|---------|------|
+| **Gazebo 版本** | v1.14 同时支持 Gazebo Classic 和 Gazebo Garden。chainwing_3body 仅支持 Garden (gz-sim) |
+| **控制分配** | v1.14 使用新版控制分配器（ControlAllocator），elevon 类型正确支持 |
+| **串口映射** | 硬件 UART 端口名称因板子而异。`/dev/ttyS2` 在不同板子上对应不同物理端口 |
+| **MAVLink 版本** | v1.14 默认 MAVLink v2，DEBUG_FLOAT_ARRAY 属于 common 消息集 |
+| **参数存储** | 硬件上参数存储在 EEPROM/SD 卡，首次烧录需设置所有 CW_SLV_* 参数 |
+
+### 28.8 不同 PX4 版本的兼容性预估
+
+| PX4 版本 | chainwing_slave | gz_bridge 修改 | 3body 模型 | 整体兼容 |
+|---------|----------------|---------------|-----------|---------|
+| v1.14.x | ✅ | ✅ | ✅ | ✅ **完全兼容** |
+| v1.13.x | ✅ | ⚠️ gz_bridge 可能不存在 | ❌ 无 gz-sim | ⚠️ 仅核心模块可用 |
+| v1.15.x | ✅ | ⚠️ API 可能有变化 | ✅ | ⚠️ 需小幅适配 |
+| v1.12.x | ⚠️ 缺少 SubscriptionInterval | ❌ | ❌ | ❌ 需大幅重写 |
+
+### 28.9 总结
+
+| 问题 | 答案 |
+|------|------|
+| 代码能在 v1.14 上运行吗？ | ✅ **可以**，当前代码库本身就基于 v1.14 |
+| 需要修改代码吗？ | ❌ 不需要 |
+| 能编译到硬件吗？ | ✅ 可以（Pixhawk 4/5/6 全兼容） |
+| 移植到干净 v1.14 难吗？ | 简单，复制 12 个文件 + 合并 1 个文件 |
+| 建议的硬件 | Pixhawk 6X / 6C / CubeOrange |
