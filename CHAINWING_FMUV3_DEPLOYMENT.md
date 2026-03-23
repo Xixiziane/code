@@ -1,6 +1,8 @@
 # 链翼 FMU-V3 硬件部署评估与实施建议
 
-> 版本：v1.0 | 日期：2026-03-23 | 目标飞控：px4_fmu-v3 (STM32F427)
+> 版本：v1.1 | 日期：2026-03-23 | 目标飞控：**Pixhawk 2.4.8** (px4_fmu-v3 / STM32F427)
+>
+> ⚠️ 本文档已根据实际飞控硬件图片 (`飞控.jpg`) 更新，包含 Pixhawk 2.4.8 的具体接口分配和接线建议。
 
 ---
 
@@ -80,12 +82,17 @@
 
 ---
 
-## 3. FMU-V3 硬件约束分析
+## 3. Pixhawk 2.4.8 硬件约束分析
+
+> 📷 参考：`飞控.jpg` — Pixhawk 2.4.8 接口引脚图
 
 ### 3.1 处理器与存储
 
 ```
 ┌───────────────────────────────────────┐
+│  Pixhawk 2.4.8 (双 MCU 架构)         │
+├───────────────────────────────────────┤
+│  主处理器 FMU:                        │
 │  STM32F427VIT6 (Cortex-M4F, 180MHz)  │
 ├───────────┬───────────────────────────┤
 │  Flash    │  2048 KB (2 MB)           │
@@ -93,6 +100,11 @@
 │  SRAM     │  256 KB                   │
 │  TCM      │  64 KB (快速内存)         │
 │  FPU      │  ✅ 硬件浮点单元          │
+├───────────┼───────────────────────────┤
+│  IO协处理器 PX4IO:                     │
+│  STM32F100 (Cortex-M3, 24MHz)        │
+│  用途：MAIN OUT 1-8 PWM输出           │
+│  SYS_USE_IO = 1 (默认启用)            │
 ├───────────┼───────────────────────────┤
 │  约束标记  │  CONFIG_BOARD_CONSTRAINED │
 │           │  _MEMORY = y              │
@@ -113,24 +125,118 @@ ChainwingSlave.cpp (377行) + ChainwingSlave.hpp (~170行)
 
 **结论：** 对 2032KB Flash 来说仅增加 ~1%，完全可接受。
 
-### 3.3 可用 UART 端口
-
-| 端口 | 设备名 | 默认用途 | 可用性 |
-|------|--------|---------|--------|
-| UART1 | /dev/ttyS1 | TEL1 (数传) | 已占用 |
-| UART2 | /dev/ttyS2 | TEL2 (空闲) | ✅ **推荐用于从机通信** |
-| UART3 | /dev/ttyS3 | GPS | 已占用 |
-| UART6 | /dev/ttyS6 | TEL4 (空闲) | ✅ 备用 |
-
-### 3.4 PWM 输出通道
+### 3.3 Pixhawk 2.4.8 接口布局（对照 飞控.jpg）
 
 ```
-FMU-V3 PWM 输出:
-├── MAIN OUT 1-8:  通过 IO 协处理器 (PX4IO)
-│   ├── MAIN 1-3: 电机 (Motor 0/1/2)
-│   └── MAIN 4-6: 舵面 (Servo 0/1/2) ← trim 叠加在这里
-└── AUX OUT 1-6:  直接 FMU PWM
-    └── 可用于额外功能
+┌─────────────────────────────────────────────────────────────┐
+│                    Pixhawk 2.4.8 顶视图                      │
+│                                                             │
+│  ┌─────┐  ┌──────┐  ┌──────┐  ┌────┐  ┌──────┐  ┌──────┐  │
+│  │DSM  │  │TELEM2│  │TELEM1│  │SPKT│  │SERIAL│  │BUZZER│  │
+│  │     │  │+SD卡 │  │      │  │/DSM│  │  /5  │  │      │  │
+│  └─────┘  └──────┘  └──────┘  └────┘  └──────┘  └──────┘  │
+│                                                             │
+│  ┌─────┐  ┌──────┐  ┌─────┐  ┌─────┐  ┌──────┐  ┌──────┐  │
+│  │USB  │  │ADC   │  │ SPI │  │ I2C │  │POWER │  │ GPS  │  │
+│  │     │  │3.3V  │  │     │  │     │  │      │  │      │  │
+│  └─────┘  └──────┘  └─────┘  └─────┘  └──────┘  └──────┘  │
+│                                                             │
+│  ┌────────────────────────┐  ┌────────────────────────────┐ │
+│  │  MAIN OUT 1-8 (PX4IO) │  │  AUX OUT 1-6 (FMU直接)    │ │
+│  └────────────────────────┘  └────────────────────────────┘ │
+│                    ┌──────┐                                  │
+│                    │ CAN  │                                  │
+│                    └──────┘                                  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 3.4 可用 UART 端口（基于 Pixhawk 2.4.8 实际硬件）
+
+| 物理接口 | 设备名 | USART | 默认用途 | 流控 | 可用性 |
+|---------|--------|-------|---------|------|--------|
+| **TELEM1** | /dev/ttyS1 | USART2 | 数传/GCS | RTS/CTS | ⚠️ 已占用（QGC） |
+| **TELEM2** | /dev/ttyS2 | USART3 | 空闲 | RTS/CTS | ✅ **推荐用于从机通信** |
+| **GPS** | /dev/ttyS3 | USART1 | GPS 模块 | — | ❌ 已占用 |
+| **PX4IO** | /dev/ttyS4 | USART6 | IO协处理器 | — | ❌ 系统内部 |
+| **SERIAL5** | /dev/ttyS6 | UART4 | 空闲 | — | ✅ 备用（无流控） |
+
+> 📌 **TELEM2 推荐理由**：
+> - 硬件流控 (RTS/CTS) 保证高速率传输可靠性
+> - 有 DMA 支持 (DMA1 Stream4 Ch7 TX)
+> - 6 针 DF13 接口，方便接线
+> - 位于飞控板侧面，便于走线
+
+### 3.5 TELEM2 接口引脚定义（6 针 DF13）
+
+```
+TELEM2 连接器 (DF13-6P)：
+┌─────────────────────────────────┐
+│  Pin 1: +5V   (供电给从机)      │
+│  Pin 2: TX    → 从机 RX         │
+│  Pin 3: RX    ← 从机 TX         │
+│  Pin 4: CTS   (可选流控)        │
+│  Pin 5: RTS   (可选流控)        │
+│  Pin 6: GND   (共地)            │
+└─────────────────────────────────┘
+
+与从机 Pixhawk 连线：
+┌──────────────────┐         ┌──────────────────┐
+│  主机 TELEM2     │         │  从机 TELEM2     │
+│  Pin 1: +5V   ───┤─ (不连) ├── Pin 1: +5V    │
+│  Pin 2: TX    ───┤────────→├── Pin 3: RX     │
+│  Pin 3: RX    ───┤←────────├── Pin 2: TX     │
+│  Pin 4: CTS   ───┤─ (可选) ├── Pin 5: RTS    │
+│  Pin 5: RTS   ───┤─ (可选) ├── Pin 4: CTS    │
+│  Pin 6: GND   ───┤────────→├── Pin 6: GND    │
+└──────────────────┘         └──────────────────┘
+
+⚠️ 注意：TX↔RX 交叉连接！不要连 +5V（各自独立供电）
+```
+
+### 3.6 PWM 输出通道（Pixhawk 2.4.8 特有双 MCU 架构）
+
+```
+Pixhawk 2.4.8 PWM 输出（双 MCU）:
+
+MAIN OUT 1-8 (通过 PX4IO 协处理器):
+├── MAIN 1: Motor 0 — 左机翼电机
+├── MAIN 2: Motor 1 — 中央机翼电机
+├── MAIN 3: Motor 2 — 右机翼电机
+├── MAIN 4: Servo 0 — 左 Elevon     ← ⭐ trim 叠加在这里
+├── MAIN 5: Servo 1 — 中央 Elevator
+├── MAIN 6: Servo 2 — 右 Elevon     ← ⭐ trim 叠加在这里
+├── MAIN 7: (空闲)
+└── MAIN 8: (空闲)
+
+AUX OUT 1-6 (FMU 直接 PWM, 6 通道):
+├── AUX 1-6: 备用（可用于辅助功能）
+└── 注意：如果 SYS_USE_IO=0 则 AUX 变成主输出
+
+⚠️ 对于 chainwing 项目：
+   SYS_USE_IO = 1（使用 PX4IO 输出 MAIN PWM）
+   trim 叠加作用于 MAIN 4 和 MAIN 6（Servo 0 和 Servo 2）
+```
+
+### 3.7 Pixhawk 2.4.8 单机部署接线总览
+
+```
+                          ┌────────────────────────────────┐
+                          │     Pixhawk 2.4.8 (主控)       │
+                          │                                │
+  QGC/数传 ←── TELEM1    │  TELEM1: /dev/ttyS1 (USART2)  │
+                          │  TELEM2: /dev/ttyS2 (USART3)  │── TELEM2 → 从机(可选)
+                          │  GPS:    /dev/ttyS3 (USART1)  │── GPS → GPS模块
+                          │                                │
+  左电机  ←── MAIN 1     │  MAIN OUT 1-8 (via PX4IO):    │
+  中电机  ←── MAIN 2     │   1-3: 电机                    │
+  右电机  ←── MAIN 3     │   4-6: 舵面                    │
+  左Elevon←── MAIN 4     │   4: 左Elevon (Servo 0) ⭐trim │
+  Elevator←── MAIN 5     │   5: Elevator (Servo 1)        │
+  右Elevon←── MAIN 6     │   6: 右Elevon (Servo 2) ⭐trim │
+                          │                                │
+                          │  POWER: 电源模块               │
+                          │  USB:   调试/烧录              │
+                          └────────────────────────────────┘
 ```
 
 ---
@@ -504,22 +610,54 @@ nsh> listener actuator_servos -n 3
   第3飞：KP = 1.5, TRIM_MAX = 0.3 (目标值)
 ```
 
-### 9.4 三机分布式架构（可选进阶）
+### 9.4 三机分布式架构（基于 3 台 Pixhawk 2.4.8）
 
 ```
-如果使用 3 台 Pixhawk（每个机翼单元一台）：
+三台 Pixhawk 2.4.8 接线方案：
 
-主机 (Center Pixhawk):
-  - 运行标准 FW 控制栈
-  - UART2 连接到左从机
-  - UART6 连接到右从机
-  - mavlink start -x -d /dev/ttyS2 -b 921600 -m custom
-  - mavlink stream -d /dev/ttyS2 -s DEBUG_FLOAT_ARRAY -r 10
+┌──────────────────────────────────────────────────────────────┐
+│                     3 × Pixhawk 2.4.8 部署                   │
+│                                                              │
+│  ┌─────────────────┐                  ┌─────────────────┐   │
+│  │ 左从机 Pixhawk   │                  │ 右从机 Pixhawk   │   │
+│  │                  │                  │                  │   │
+│  │ TELEM2 ─────────┤──── UART ────────├─── TELEM2       │   │
+│  │                  │    TX↔RX交叉     │                  │   │
+│  │ MAIN 4: 左Elevon│                  │ MAIN 4: 右Elevon│   │
+│  │ MAIN 1: 左电机  │                  │ MAIN 1: 右电机  │   │
+│  └──────┬───────────┘                  └──────┬───────────┘   │
+│         │                                     │              │
+│         │ TELEM2 (/dev/ttyS2)                 │              │
+│         │ TX↔RX交叉                           │              │
+│         │                                     │              │
+│         ▼                                     ▼              │
+│  ┌──────────────────────────────────────────────────────┐    │
+│  │              主机 Pixhawk 2.4.8 (中央)                │    │
+│  │                                                      │    │
+│  │  TELEM2 (/dev/ttyS2) → 连接左从机                    │    │
+│  │  SERIAL5 (/dev/ttyS6) → 连接右从机（备选：I2C转UART）│    │
+│  │  TELEM1 (/dev/ttyS1) → QGC/数传                      │    │
+│  │  MAIN 5: 中央 Elevator                                │    │
+│  │  MAIN 2: 中央电机                                     │    │
+│  └──────────────────────────────────────────────────────┘    │
+└──────────────────────────────────────────────────────────────┘
 
-从机 (Left/Right Pixhawk):
-  - 运行 chainwing_slave
-  - CW_SLV_COMM_EN = 1
-  - mavlink start -d /dev/ttyS2 -b 921600 -m custom
+主机 MAVLink 配置：
+  mavlink start -x -d /dev/ttyS2 -b 921600 -m custom
+  mavlink stream -d /dev/ttyS2 -s DEBUG_FLOAT_ARRAY -r 10
+  # 如果连接右从机到 SERIAL5:
+  mavlink start -x -d /dev/ttyS6 -b 921600 -m custom
+  mavlink stream -d /dev/ttyS6 -s DEBUG_FLOAT_ARRAY -r 10
+
+从机 MAVLink 配置（左/右相同）：
+  mavlink start -d /dev/ttyS2 -b 921600 -m custom
+  CW_SLV_COMM_EN = 1
+
+⚠️ 注意事项：
+  1. 必须使用 -m custom（不是 -m onboard）避免 ODOMETRY 刷屏
+  2. SERIAL5 (/dev/ttyS6) 无硬件流控，长线缆建议降速到 115200
+  3. 三台 Pixhawk 各自独立供电，仅连 TX/RX/GND
+  4. TELEM2 的 Pin 1 (+5V) 不要互连！
 ```
 
 ---
@@ -662,5 +800,14 @@ nsh> param show CW_*
 - 两条路径互斥，由参数控制
 
 ---
+
+---
+
+## 14. 版本历史
+
+| 版本 | 日期 | 变更内容 |
+|------|------|---------|
+| v1.0 | 2026-03-23 | 初版：工作量评估 + 4阶段实施路线 |
+| v1.1 | 2026-03-23 | 基于 Pixhawk 2.4.8 实物引脚图更新：§3 接口布局、TELEM2 接线、PWM 通道映射、三机接线方案 |
 
 *文档结束 — 如有疑问，参考 CHAINWING_HIL_REALFLIGHT_GUIDE.md 获取更详细的架构设计*
