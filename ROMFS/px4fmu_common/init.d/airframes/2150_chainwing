@@ -8,9 +8,9 @@
 # @output MAIN1 Motor 1 (left unit)
 # @output MAIN2 Motor 2 (center unit)
 # @output MAIN3 Motor 3 (right unit)
-# @output MAIN4 Right Elevon (left unit - reversed for chain-wing roll stability)
+# @output MAIN4 Right Elevon (left unit - slave roll trim overlay)
 # @output MAIN5 Elevator (center unit)
-# @output MAIN6 Left Elevon (right unit - reversed for chain-wing roll stability)
+# @output MAIN6 Left Elevon (right unit - slave roll trim overlay)
 #
 # @board bitcraze_crazyflie exclude
 #
@@ -83,3 +83,37 @@ param set-default FW_YAW_STAB_SC 2.0
 
 # Pitch offset for level flight (GZ trim for larger aircraft)
 param set-default FW_PSP_OFF 2.0
+
+# ================================================================
+# Chain-wing slave controller parameters (hinge roll trim)
+# ================================================================
+# Enable slave controller on hardware
+param set-default CW_SLV_EN 1
+
+# PD gains (tuned for k=200 N·m/rad, c=12 N·m·s/rad hinge stiffness)
+# Provides 38% controller contribution at ωn=2.72Hz, ζ=0.51
+param set-default CW_SLV_KP 1.5
+param set-default CW_SLV_KD 0.2
+
+# Max trim: 30% of elevon travel reserved for hinge correction
+param set-default CW_SLV_TRIM_MAX 0.3
+
+# Low-pass filter on hinge rate signal
+param set-default CW_SLV_LP_FREQ 10.0
+
+# Enable hardware PWM trim overlay (Scheme C)
+# Directly modifies actuator_servos: control[0] += trim_left, control[2] += trim_right
+param set-default CW_SLV_PWM_EN 1
+
+# Disable MAVLink communication for single-Pixhawk setup
+# Set to 1 for 3-Pixhawk distributed architecture
+param set-default CW_SLV_COMM_EN 0
+
+# ================================================================
+# UART MAVLink for 3-Pixhawk distributed setup (uncomment if needed)
+# ================================================================
+# mavlink start -d /dev/ttyS2 -b 921600 -r 4000 -m custom
+# mavlink stream -d /dev/ttyS2 -s DEBUG_FLOAT_ARRAY -r 10
+
+# Auto-start chainwing_slave module
+chainwing_slave start

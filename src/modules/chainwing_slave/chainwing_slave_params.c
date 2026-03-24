@@ -126,8 +126,8 @@ PARAM_DEFINE_FLOAT(CW_SLV_LP_FREQ, 10.0f);
  * DEBUG_FLOAT_ARRAY (id=42, name="CW_HINGE") and listens for
  * master commands as DEBUG_FLOAT_ARRAY (id=43, name="CW_CMD").
  *
- * Requires a MAVLink instance configured in onboard mode:
- *   mavlink start -d /dev/ttyS2 -b 921600 -m onboard
+ * Requires a MAVLink instance configured in custom mode:
+ *   mavlink start -d /dev/ttyS2 -b 921600 -m custom
  *
  * 0 = disabled (uORB only, for simulation)
  * 1 = enabled  (MAVLink bridge, for hardware verification)
@@ -136,3 +136,23 @@ PARAM_DEFINE_FLOAT(CW_SLV_LP_FREQ, 10.0f);
  * @group Chain-Wing Slave
  */
 PARAM_DEFINE_INT32(CW_SLV_COMM_EN, 0);
+
+/**
+ * Hardware PWM trim overlay enable
+ *
+ * Enable direct actuator_servos modification for hardware PWM trim.
+ * When enabled, ChainwingSlave reads the actuator_servos values
+ * published by the control allocator, adds hinge trim corrections
+ * to the left (control[0]) and right (control[2]) elevon channels,
+ * and re-publishes the modified values.
+ *
+ * This replaces the Gazebo-only GZMixingInterfaceServo trim path
+ * for real hardware (Pixhawk 2.4.8 / FMU-V3).
+ *
+ * 0 = disabled (simulation uses GZMixingInterfaceServo instead)
+ * 1 = enabled  (hardware: direct actuator_servos trim overlay)
+ *
+ * @boolean
+ * @group Chain-Wing Slave
+ */
+PARAM_DEFINE_INT32(CW_SLV_PWM_EN, 0);

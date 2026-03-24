@@ -145,6 +145,7 @@ private:
 	// Publications
 	uORB::Publication<chainwing_hinge_status_s> _hinge_status_pub{ORB_ID(chainwing_hinge_status)};
 	uORB::Publication<debug_array_s> _debug_array_pub{ORB_ID(debug_array)};  ///< Hinge status via MAVLink bridge
+	uORB::Publication<actuator_servos_s> _actuator_servos_pub{ORB_ID(actuator_servos)};  ///< Hardware PWM trim overlay
 
 	// State variables for IMU integration
 	float _hinge_angle_left{0.0f};   ///< Estimated left hinge angle (rad)
@@ -173,6 +174,7 @@ private:
 		(ParamFloat<px4::params::CW_SLV_TRIM_MAX>) _param_trim_max,
 		(ParamFloat<px4::params::CW_SLV_LP_FREQ>)  _param_lp_freq,
 		(ParamInt<px4::params::CW_SLV_EN>)         _param_enable,
-		(ParamInt<px4::params::CW_SLV_COMM_EN>)    _param_comm_enable
+		(ParamInt<px4::params::CW_SLV_COMM_EN>)    _param_comm_enable,
+		(ParamInt<px4::params::CW_SLV_PWM_EN>)     _param_pwm_enable
 	)
 };

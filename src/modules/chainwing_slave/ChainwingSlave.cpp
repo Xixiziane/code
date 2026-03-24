@@ -109,7 +109,7 @@ void ChainwingSlave::Run()
 	const float trim_left = computeTrim(_hinge_angle_left, _hinge_rate_left);
 	const float trim_right = computeTrim(_hinge_angle_right, _hinge_rate_right);
 
-	// Publish hinge status (includes trim values for GZMixingInterfaceServo)
+	// Publish hinge status (includes trim values for GZMixingInterfaceServo or PWM overlay)
 	chainwing_hinge_status_s status{};
 	status.timestamp = hrt_absolute_time();
 	status.hinge_angle_left = _hinge_angle_left;
@@ -120,6 +120,23 @@ void ChainwingSlave::Run()
 	status.trim_right = trim_right;
 	status.data_valid = _ref_initialized;
 	_hinge_status_pub.publish(status);
+
+	// Hardware PWM trim overlay (Scheme C):
+	// Read actuator_servos from control_allocator, add trim to elevon channels,
+	// and re-publish so that PWMOut receives the trimmed values.
+	// This replaces GZMixingInterfaceServo for real hardware.
+	if (_param_pwm_enable.get() != 0 && _ref_initialized) {
+		actuator_servos_s servos{};
+
+		if (_actuator_servos_sub.copy(&servos)) {
+			// Apply hinge trim correction to left and right elevon channels
+			servos.control[0] = math::constrain(servos.control[0] + trim_left, -1.0f, 1.0f);
+			servos.control[2] = math::constrain(servos.control[2] + trim_right, -1.0f, 1.0f);
+
+			servos.timestamp = hrt_absolute_time();
+			_actuator_servos_pub.publish(servos);
+		}
+	}
 
 	// MAVLink communication: publish hinge data and receive master commands
 	if (_param_comm_enable.get() != 0) {
@@ -298,6 +315,7 @@ int ChainwingSlave::print_status()
 {
 	PX4_INFO("Chain-wing slave controller");
 	PX4_INFO("  Enabled: %s", (_param_enable.get() != 0) ? "YES" : "NO");
+	PX4_INFO("  PWM trim overlay: %s", (_param_pwm_enable.get() != 0) ? "ENABLED (hardware)" : "DISABLED (sim)");
 	PX4_INFO("  Communication: %s", (_param_comm_enable.get() != 0) ? "ENABLED" : "DISABLED");
 	PX4_INFO("  Reference initialized: %s", _ref_initialized ? "YES" : "NO");
 	PX4_INFO("  Hinge angles: left=%.3f deg, right=%.3f deg",
@@ -357,9 +375,15 @@ Requires: mavlink start -d /dev/ttyS2 -b 921600 -m onboard
 
 ### Implementation
 The module runs at 50 Hz and publishes ChainwingHingeStatus containing
-the computed trim values. The GZMixingInterfaceServo reads these trim
-values and adds them to the slave elevator servo outputs (servo_0 for
-left slave, servo_2 for right slave).
+the computed trim values.
+
+In simulation (SITL): GZMixingInterfaceServo reads the trim values and
+adds them to the Gazebo servo outputs (servo_0 and servo_2).
+
+On hardware (CW_SLV_PWM_EN=1): ChainwingSlave directly modifies the
+actuator_servos topic by reading control_allocator output, adding trim
+to control[0] (left elevon) and control[2] (right elevon), and
+re-publishing for PWMOut to consume.
 
 )DESCR_STR");
 

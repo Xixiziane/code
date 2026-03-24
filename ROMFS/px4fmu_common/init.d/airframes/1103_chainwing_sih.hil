@@ -128,3 +128,28 @@ param set-default FW_PSP_OFF 2.0
 
 # --- Throttle ---
 param set-default FW_THR_TRIM 0.60
+
+# ================================================================
+# Chain-wing slave controller parameters (hinge roll trim)
+# ================================================================
+# Enable slave controller for SIH
+param set-default CW_SLV_EN 1
+
+# PD gains (same as SITL Gazebo — tuned for hinge stiffness k=200)
+param set-default CW_SLV_KP 1.5
+param set-default CW_SLV_KD 0.2
+
+# Max trim: 30% of elevon travel
+param set-default CW_SLV_TRIM_MAX 0.3
+
+# Low-pass filter on hinge rate signal
+param set-default CW_SLV_LP_FREQ 10.0
+
+# Enable hardware PWM trim overlay for SIH (no Gazebo bridge available)
+param set-default CW_SLV_PWM_EN 1
+
+# Disable MAVLink communication for single-board SIH
+param set-default CW_SLV_COMM_EN 0
+
+# Auto-start chainwing_slave module
+chainwing_slave start
