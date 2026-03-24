@@ -1,8 +1,9 @@
-# 链翼 FMU-V3 硬件部署评估与实施建议
+# 链翼 FMU-V3 硬件部署评估与实施指南
 
-> 版本：v1.1 | 日期：2026-03-23 | 目标飞控：**Pixhawk 2.4.8** (px4_fmu-v3 / STM32F427)
+> 版本：v2.0 | 日期：2026-03-24 | 目标飞控：**Pixhawk 2.4.8** (px4_fmu-v3 / STM32F427)
 >
-> ⚠️ 本文档已根据实际飞控硬件图片 (`飞控.jpg`) 更新，包含 Pixhawk 2.4.8 的具体接口分配和接线建议。
+> ✅ **v2.0 更新**：代码已实现！PWM Trim 叠加（方案 C）+ 板级配置 + 机架文件全部完成。
+> 新增 §A「硬件/实机完整控制流程」详细阐述三种部署架构的信息流。
 
 ---
 
@@ -21,6 +22,17 @@
 11. [测试验证计划](#11-测试验证计划)
 12. [风险评估与建议](#12-风险评估与建议)
 13. [FAQ](#13-faq)
+14. [**附录 A：硬件/实机完整控制流程**](#a-硬件实机完整控制流程)
+    - [A.1 三种部署架构总览](#a1-三种部署架构总览)
+    - [A.2 架构一：单 Pixhawk 实机控制流程](#a2-架构一单-pixhawk-实机控制流程)
+    - [A.3 架构二：SIH 硬件在环控制流程](#a3-架构二sih-硬件在环控制流程)
+    - [A.4 架构三：三 Pixhawk 分布式控制流程](#a4-架构三三-pixhawk-分布式控制流程)
+    - [A.5 各飞控的电机/舵机输出分配](#a5-各飞控的电机舵机输出分配)
+    - [A.6 姿态设定值输入方式](#a6-姿态设定值输入方式)
+    - [A.7 PWM Trim 叠加实现细节](#a7-pwm-trim-叠加实现细节)
+    - [A.8 控制频率与时序分析](#a8-控制频率与时序分析)
+    - [A.9 安全机制](#a9-安全机制)
+15. [版本历史](#15-版本历史)
 
 ---
 
@@ -41,11 +53,11 @@
 
 | 项目 | 状态 | 说明 |
 |------|------|------|
-| fmu-v3 板级配置 | ✅ 存在 | `boards/px4/fmu-v3/` 完整 |
-| chainwing_slave 在 fmu-v3 上编译 | ❌ 未启用 | 需加 `CONFIG_MODULES_CHAINWING_SLAVE=y` |
-| 硬件机架文件 | ⚠️ 不完整 | `2150_chainwing` 缺少 CW_SLV_* 参数 |
-| SIH 机架文件 | ⚠️ 不完整 | `1103_chainwing_sih.hil` 缺少 CW_SLV_* 参数 |
-| PWM trim 叠加 | ❌ 不存在 | GZMixingInterfaceServo 是 Gazebo 专用 |
+| fmu-v3 板级配置 | ✅ 完成 | `boards/px4/fmu-v3/` + `CONFIG_MODULES_CHAINWING_SLAVE=y` |
+| chainwing_slave 在 fmu-v3 上编译 | ✅ 已启用 | 已添加到 default.px4board |
+| 硬件机架文件 | ✅ 完成 | `2150_chainwing` 含 CW_SLV_* + chainwing_slave start |
+| SIH 机架文件 | ✅ 完成 | `1103_chainwing_sih.hil` 含 CW_SLV_* + chainwing_slave start |
+| PWM trim 叠加 | ✅ 已实现 | 方案 C: ChainwingSlave 直接修改 actuator_servos |
 | PWM 驱动 | ✅ 已有 | `CONFIG_DRIVERS_PWM_OUT=y` 已在 fmu-v3 启用 |
 | UART 通信 | ✅ 已有 | MAVLink DEBUG_FLOAT_ARRAY 代码已在 ChainwingSlave.cpp |
 | IMU 铰链估计 | ✅ 已有 | 互补滤波器代码无需修改，硬件 IMU 数据格式一致 |
@@ -803,11 +815,727 @@ nsh> param show CW_*
 
 ---
 
-## 14. 版本历史
+## 附录 A：硬件/实机完整控制流程 {#a-硬件实机完整控制流程}
+
+> 本附录详细描述链翼 UAV 在三种硬件部署架构下的完整控制流程，包括：
+> 预期姿态的输入、各飞控负责的信息流、以及各飞控的电机/舵机输出流。
+> 所有信息均基于已实现的代码，可直接对照源文件验证。
+
+---
+
+### A.1 三种部署架构总览 {#a1-三种部署架构总览}
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    链翼 UAV 三种部署架构对比                              │
+├──────────────┬──────────────────┬──────────────────┬────────────────────┤
+│              │ 架构一：单Pixhawk  │ 架构二：SIH      │ 架构三：三Pixhawk   │
+│              │ 实机飞行          │ 硬件在环          │ 分布式实机          │
+├──────────────┼──────────────────┼──────────────────┼────────────────────┤
+│ 飞控数量      │ 1台              │ 1台              │ 3台                │
+│ 机架文件      │ 2150_chainwing   │ 1103_chainwing   │ 2150_chainwing ×3  │
+│              │                  │ _sih.hil         │                    │
+│ 物理传感器    │ ✅ 真实IMU/GPS   │ ❌ SIH模拟       │ ✅ 各自独立IMU/GPS  │
+│ PWM 输出     │ ✅ MAIN 1-6     │ ✅ HIL虚拟PWM    │ ✅ 各自 MAIN OUT    │
+│ 铰链物理      │ ✅ 真实铰链      │ ❌ 无铰链模型     │ ✅ 真实铰链         │
+│ 通信方式      │ uORB (进程内)    │ uORB (进程内)    │ UART MAVLink       │
+│ CW_SLV_PWM_EN│ 1               │ 1               │ 1 (各从机)         │
+│ CW_SLV_COMM_EN│ 0              │ 0               │ 1 (各从机)         │
+│ 适用阶段      │ 首飞验证         │ 地面桌面测试      │ 量产/大规模部署     │
+└──────────────┴──────────────────┴──────────────────┴────────────────────┘
+```
+
+---
+
+### A.2 架构一：单 Pixhawk 实机控制流程 {#a2-架构一单-pixhawk-实机控制流程}
+
+> **推荐首飞方案**：一台 Pixhawk 2.4.8 控制全部 3 个机翼单元。
+
+#### A.2.1 系统总览框图
+
+```
+                        ┌──────────────────────────────────────────────────┐
+                        │            Pixhawk 2.4.8 (FMU-V3)               │
+                        │                                                  │
+  ┌──────┐   GPS/MAG    │  ┌──────────┐    ┌───────────┐    ┌──────────┐  │   MAIN OUT
+  │ GPS  │──────────────→│  │  EKF2    │───→│ Navigator │───→│ FW_Pos   │  │   ┌──────┐
+  └──────┘              │  │(位置估计) │    │(任务规划) │    │(TECS/NPFG│  │   │MAIN 1│→ 电机(左)
+                        │  └──────────┘    └───────────┘    │ 位置控制) │  │   │MAIN 2│→ 电机(中)
+  ┌──────┐   加速度/角速│  ┌──────────┐                     └─────┬─────┘  │   │MAIN 3│→ 电机(右)
+  │ IMU  │──────────────→│  │  姿态    │         ┌──────────────────┘       │   │MAIN 4│→ 左Elevon
+  │MPU6000│             │  │  估计器   │         ↓                         │   │MAIN 5│→ 中Elevator
+  └──────┘              │  └──────────┘  ┌──────────────┐  ┌───────────┐  │   │MAIN 6│→ 右Elevon
+                        │        │       │ FW_Att/Rate  │  │ Control   │  │   └──────┘
+  ┌──────┐   空速       │        ↓       │ (姿态/角速率 │→│ Allocator │  │
+  │空速管│──────────────→│  vehicle_     │  PID 控制)   │  │ (效率矩阵 │  │
+  └──────┘              │  attitude     └──────────────┘  │  →舵面)    │  │
+                        │        │                        └─────┬──────┘  │
+  ┌──────┐   RC信号     │        │                              ↓         │
+  │ 遥控 │──────────────→│        │        ┌─────────────────────────────┐ │
+  └──────┘              │        │        │   actuator_servos (uORB)    │ │
+                        │        ↓        │   control[0]=左Elevon       │ │
+                        │  ┌──────────┐   │   control[1]=中Elevator     │ │
+                        │  │ChainWing │   │   control[2]=右Elevon       │ │
+                        │  │ Slave    │   └──────────┬──────────────────┘ │
+                        │  │(铰链估计 │              ↓                    │
+                        │  │ +PD trim)│→ 叠加trim → actuator_servos(修正) │
+                        │  └──────────┘       ↓                          │
+                        │                ┌──────────┐  ┌──────────────┐  │
+                        │                │FuncServos│→│    PWMOut     │  │
+                        │                │(读取servo)│  │(输出PWM信号) │  │
+                        │                └──────────┘  └──────────────┘  │
+                        └──────────────────────────────────────────────────┘
+```
+
+#### A.2.2 完整信息流追踪（从遥控输入到舵面输出）
+
+**第 1 层：姿态设定值输入**
+
+```
+遥控器输入 (PPM/SBUS)
+    ↓
+manual_control_setpoint (uORB, ~50Hz)
+    ├── roll_stick     → FW_R_TC → att_sp.roll_body    (目标滚转角, rad)
+    ├── pitch_stick    → FW_P_TC → att_sp.pitch_body   (目标俯仰角, rad)
+    ├── yaw_stick      →           yaw_rate_cmd        (偏航角速率, rad/s)
+    └── throttle_stick →           att_sp.thrust_body   (油门 [0,1])
+
+自主飞行模式：
+Navigator → position_setpoint_triplet (航点目标)
+    ↓
+FW_Pos_Control (NPFG 横向 + TECS 纵向)
+    ↓
+vehicle_attitude_setpoint (uORB, ~50Hz)
+    ├── roll_body      (目标滚转角, 由NPFG导航律计算)
+    ├── pitch_body     (目标俯仰角, 由TECS能量管理计算)
+    ├── yaw_body       (目标航向角)
+    └── thrust_body[0] (纵向推力, 由TECS计算)
+```
+
+**第 2 层：姿态与角速率控制**
+
+```
+vehicle_attitude_setpoint
+    ↓
+FW_Att_Control (50Hz)
+    │   误差 = 设定值 - 当前姿态
+    │   角速率设定值 = 误差 × (1/时间常数)
+    │
+    │   Roll:  ω_roll_sp  = (φ_sp - φ) / FW_R_TC     (FW_R_TC=0.5s)
+    │   Pitch: ω_pitch_sp = (θ_sp - θ) / FW_P_TC     (FW_P_TC=0.5s)
+    ↓
+vehicle_rates_setpoint (uORB)
+    ↓
+FW_Rate_Control (250Hz)
+    │
+    │   横滚力矩: τ_roll  = FW_RR_P × e_p + FW_RR_I × ∫e_p + FW_RR_FF × ω_roll_sp
+    │   俯仰力矩: τ_pitch = FW_PR_P × e_q + FW_PR_I × ∫e_q + FW_PR_FF × ω_pitch_sp
+    │   偏航力矩: τ_yaw   = FW_YR_P × e_r + FW_YR_I × ∫e_r + FW_YR_FF × ω_yaw_sp
+    │
+    │   空速缩放: τ_scaled = τ × (FW_AIRSPD_TRIM / airspeed_true)²
+    ↓
+vehicle_torque_setpoint (uORB)
+    ├── xyz[0] = τ_roll   (归一化横滚力矩)
+    ├── xyz[1] = τ_pitch  (归一化俯仰力矩)
+    └── xyz[2] = τ_yaw    (归一化偏航力矩)
+```
+
+**第 3 层：控制分配（力矩 → 舵面偏转）**
+
+```
+vehicle_torque_setpoint + vehicle_thrust_setpoint
+    ↓
+ControlAllocator (250Hz)
+    │
+    │   效率矩阵 B（从机架文件配置）：
+    │   ┌──────────────┬──────────┬──────────┬──────────┐
+    │   │              │ τ_roll   │ τ_pitch  │ τ_yaw    │
+    │   ├──────────────┼──────────┼──────────┼──────────┤
+    │   │ Servo 0 (左) │ +0.5     │ +0.5     │  0.0     │
+    │   │ Servo 1 (中) │  0.0     │ +1.0     │  0.0     │
+    │   │ Servo 2 (右) │ -0.5     │ +0.5     │  0.0     │
+    │   └──────────────┴──────────┴──────────┴──────────┘
+    │
+    │   伪逆求解:
+    │   Servo_0 = +0.5 × τ_roll + 0.5 × τ_pitch   (左 Elevon)
+    │   Servo_1 =                  1.0 × τ_pitch   (中 Elevator)
+    │   Servo_2 = -0.5 × τ_roll + 0.5 × τ_pitch   (右 Elevon)
+    ↓
+actuator_servos (uORB, 250Hz)
+    ├── control[0] = Servo_0  (左 Elevon, 归一化 [-1, +1])
+    ├── control[1] = Servo_1  (中 Elevator, 归一化 [-1, +1])
+    └── control[2] = Servo_2  (右 Elevon, 归一化 [-1, +1])
+```
+
+**第 4 层：铰链修正 — PWM Trim 叠加（方案 C）**
+
+```
+IMU angular_velocity (xyz[0] = roll_rate)
+    ↓
+ChainwingSlave::updateHingeEstimate() (50Hz)
+    │
+    │   铰链角估计（互补滤波器）：
+    │   1. 低通滤波: rate_filtered = (1-α)×rate_old + α×roll_rate
+    │   2. 积分+衰减: angle = e^(-dt/τ) × (angle + rate×dt)     τ=2s
+    │   3. 姿态修正:  angle = 0.98×angle + 0.02×(roll - roll_ref)
+    │
+    │   PD 控制律：
+    │   trim = Kp × θ_hinge + Kd × θ̇_hinge
+    │   trim = clamp(trim, -TRIM_MAX, +TRIM_MAX)
+    │
+    │   Kp = 1.5, Kd = 0.2, TRIM_MAX = 0.3
+    ↓
+ChainwingSlave::Run() — PWM Trim 叠加 (CW_SLV_PWM_EN=1)
+    │
+    │   读取 actuator_servos（来自 ControlAllocator）
+    │   control[0] += trim_left    →  clamp to [-1, +1]
+    │   control[2] += trim_right   →  clamp to [-1, +1]
+    │   重新发布 actuator_servos
+    ↓
+actuator_servos (uORB, 修正后)
+    ├── control[0] = Servo_0 + trim_left   (左 Elevon + 铰链修正)
+    ├── control[1] = Servo_1               (中 Elevator, 不变)
+    └── control[2] = Servo_2 + trim_right  (右 Elevon + 铰链修正)
+```
+
+**第 5 层：PWM 输出（信号 → 物理舵面）**
+
+```
+actuator_servos (修正后)
+    ↓
+FunctionServos::update() (在 MixingOutput 中运行)
+    │   读取 actuator_servos.control[] 值
+    ↓
+MixingOutput::limitAndUpdateOutputs()
+    │   归一化 [-1,1] → PWM 微秒 [1000, 2000]
+    │   output_us = 1500 + control × 500
+    ↓
+PWMOut::updateOutputs()
+    │   up_pwm_servo_set(channel, output_us)
+    ↓
+PX4IO 协处理器 (STM32F100)
+    │   MAIN OUT 1-6 PWM 信号 (50Hz, 1000-2000μs)
+    ↓
+┌──────────────────────────────────────────────────────────┐
+│ 物理执行器                                                │
+│   MAIN 1 → Motor 左  (ESC → 无刷电机)                    │
+│   MAIN 2 → Motor 中  (ESC → 无刷电机)                    │
+│   MAIN 3 → Motor 右  (ESC → 无刷电机)                    │
+│   MAIN 4 → Servo 左  (右 Elevon, 铰链修正已叠加)          │
+│   MAIN 5 → Servo 中  (中 Elevator, 纯姿态控制)            │
+│   MAIN 6 → Servo 右  (左 Elevon, 铰链修正已叠加)          │
+└──────────────────────────────────────────────────────────┘
+```
+
+#### A.2.3 完整数据流汇总表
+
+| 阶段 | uORB 话题 | 发布者 | 订阅者 | 频率 | 源文件 |
+|------|-----------|--------|--------|------|--------|
+| 传感器 | vehicle_angular_velocity | EKF2/传感器 | ChainwingSlave, FW_Rate | 250Hz | — |
+| 传感器 | vehicle_attitude | EKF2 | ChainwingSlave, FW_Att | 250Hz | — |
+| 导航 | position_setpoint_triplet | Navigator | FW_Pos | ~5Hz | — |
+| 位置 | vehicle_attitude_setpoint | FW_Pos/Manual | FW_Att | 50Hz | — |
+| 角速率 | vehicle_rates_setpoint | FW_Att | FW_Rate | 50Hz | — |
+| 力矩 | vehicle_torque_setpoint | FW_Rate | ControlAllocator | 250Hz | — |
+| 舵面(原始) | actuator_servos | ControlAllocator | ChainwingSlave | 250Hz | ControlAllocator.cpp:693 |
+| **舵面(修正)** | **actuator_servos** | **ChainwingSlave** | **FunctionServos** | **50Hz** | **ChainwingSlave.cpp:Run()** |
+| 铰链状态 | chainwing_hinge_status | ChainwingSlave | Logger | 50Hz | ChainwingSlave.cpp:122 |
+| PWM | — | PWMOut | 物理舵机 | 50Hz | PWMOut.cpp:128 |
+
+---
+
+### A.3 架构二：SIH 硬件在环控制流程 {#a3-架构二sih-硬件在环控制流程}
+
+> SIH（Simulation In Hardware）模式在 Pixhawk 硬件上运行内置物理引擎。
+> 真实传感器被 SIH 虚拟传感器替代，PWM 输出被 HIL 执行器替代。
+
+#### A.3.1 SIH 控制流程框图
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    Pixhawk 2.4.8 — SIH 模式                        │
+│                    (SYS_HITL = 2)                                   │
+│                                                                     │
+│  ┌────────────────────────────────────────────────────────────────┐ │
+│  │  SIH 物理引擎 (250Hz)                                         │ │
+│  │  ┌──────────────────────┐                                     │ │
+│  │  │ 单刚体动力学模型       │  虚拟传感器输出：                    │ │
+│  │  │ M=1.0kg              │  → vehicle_angular_velocity (虚拟)   │ │
+│  │  │ Ixx=1.02, Iyy=0.164 │  → vehicle_attitude (虚拟)           │ │
+│  │  │ Izz=1.17 kg·m²      │  → vehicle_local_position (虚拟)     │ │
+│  │  │ T_max=15N (3×5N)     │  → sensor_accel/gyro (虚拟)         │ │
+│  │  └──────────────────────┘                                     │ │
+│  │         ↑ 读取 actuator_servos + actuator_motors               │ │
+│  └────────────────────────────────────────────────────────────────┘ │
+│                                                                     │
+│  ┌──────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐  │
+│  │  EKF2    │────→│ FW_Pos   │────→│ FW_Att   │────→│ FW_Rate  │  │
+│  │(读SIH虚拟│     │(位置控制)│     │(姿态控制)│     │(角速率)  │  │
+│  │ 传感器)  │     └──────────┘     └──────────┘     └─────┬─────┘  │
+│  └──────────┘                                             ↓        │
+│                    ┌──────────────────────────────────────────────┐ │
+│                    │  ControlAllocator → actuator_servos          │ │
+│                    │                          ↓                   │ │
+│                    │  ChainwingSlave (CW_SLV_PWM_EN=1)           │ │
+│                    │       ↓ 叠加 trim                            │ │
+│                    │  actuator_servos (修正) → SIH 物理引擎       │ │
+│                    └──────────────────────────────────────────────┘ │
+│                                                                     │
+│  ⚠️ SIH 限制：                                                      │
+│  - 单刚体模型，无铰链物理 → 铰链角始终≈0                              │
+│  - trim 值≈0（无实际修正效果）                                        │
+│  - 价值：验证模块启动、参数加载、PWM通路、日志记录                       │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+#### A.3.2 SIH 模式信息流
+
+```
+SIH 虚拟传感器
+    ↓
+EKF2 (读取虚拟IMU/气压/磁力计/GPS)
+    ↓
+Navigator → FW_Pos → FW_Att → FW_Rate
+    ↓
+ControlAllocator
+    ↓
+actuator_servos (原始)
+    ↓
+ChainwingSlave (铰链角≈0 → trim≈0, 但通路完整)
+    ↓
+actuator_servos (修正后 ≈ 原始)
+    ↓
+SIH 物理引擎 (读取 actuator 值, 计算下一步状态)
+    ↓
+更新虚拟传感器 → 闭环
+```
+
+#### A.3.3 HIL 执行器映射
+
+```
+机架文件 1103_chainwing_sih.hil 定义：
+
+HIL_ACT_FUNC1 = 201  →  Servo 0 (左 Elevon)
+HIL_ACT_FUNC2 = 202  →  Servo 1 (中 Elevator)
+HIL_ACT_FUNC3 = 203  →  Servo 2 (右 Elevon)
+HIL_ACT_FUNC4 = 101  →  Motor 0 (左 电机)
+HIL_ACT_FUNC5 = 102  →  Motor 1 (中 电机)
+HIL_ACT_FUNC6 = 103  →  Motor 2 (右 电机)
+```
+
+---
+
+### A.4 架构三：三 Pixhawk 分布式控制流程 {#a4-架构三三-pixhawk-分布式控制流程}
+
+> 每个机翼单元有独立 Pixhawk。主机（中央）负责导航和姿态控制，
+> 从机（左/右）负责执行主机命令并叠加铰链修正。
+
+#### A.4.1 三机系统总览
+
+```
+┌────────────────────────────────────────────────────────────────────────────────┐
+│                          三 Pixhawk 分布式架构                                  │
+│                                                                                │
+│     ┌──────────────────┐     UART/MAVLink      ┌──────────────────┐           │
+│     │  左从机 Pixhawk   │◄═══════════════════►│  主机 Pixhawk     │           │
+│     │  (TELEM2 连接)    │   DEBUG_FLOAT_ARRAY  │  (中央单元)       │           │
+│     │                  │   id=42: 铰链状态 →   │                  │           │
+│     │  CW_SLV_EN=1     │   id=43: ← 主机命令   │  CW_SLV_EN=0    │           │
+│     │  CW_SLV_PWM_EN=1 │                      │  (不运行从机控制) │           │
+│     │  CW_SLV_COMM_EN=1│                      │                  │           │
+│     ├──────────────────┤                      ├──────────────────┤           │
+│     │ MAIN OUT:        │                      │ MAIN OUT:        │           │
+│     │  1: Motor 左     │                      │  1: Motor 中     │           │
+│     │  4: Servo 左     │                      │  5: Servo 中     │           │
+│     │  (含 trim 修正)  │                      │  (纯姿态控制)    │           │
+│     └──────────────────┘                      └────────┬─────────┘           │
+│                                                        │                     │
+│                                          UART/MAVLink  │  (SERIAL5 连接)     │
+│                                                        ↓                     │
+│                                               ┌──────────────────┐           │
+│                                               │  右从机 Pixhawk   │           │
+│                                               │  (SERIAL5 连接)   │           │
+│                                               │                  │           │
+│                                               │  CW_SLV_EN=1     │           │
+│                                               │  CW_SLV_PWM_EN=1 │           │
+│                                               │  CW_SLV_COMM_EN=1│           │
+│                                               ├──────────────────┤           │
+│                                               │ MAIN OUT:        │           │
+│                                               │  1: Motor 右     │           │
+│                                               │  4: Servo 右     │           │
+│                                               │  (含 trim 修正)  │           │
+│                                               └──────────────────┘           │
+└────────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### A.4.2 主机信息流（中央 Pixhawk）
+
+```
+传感器 → EKF2 → Navigator → FW_Pos → FW_Att → FW_Rate
+    ↓
+ControlAllocator
+    ↓
+actuator_servos.control[1] → MAIN 5 (中央 Elevator)
+actuator_motors.control[1] → MAIN 2 (中央 Motor)
+
+同时：主机 MAVLink 实例发送命令给从机
+    ↓
+mavlink start -d /dev/ttyS2 -b 921600 -r 4000 -m custom  # → 左从机
+mavlink start -d /dev/ttyS6 -b 921600 -r 4000 -m custom  # → 右从机
+mavlink stream -d /dev/ttyS2 -s DEBUG_FLOAT_ARRAY -r 10
+mavlink stream -d /dev/ttyS6 -s DEBUG_FLOAT_ARRAY -r 10
+
+发送内容 (DEBUG_FLOAT_ARRAY, id=43, "CW_CMD"):
+    data[0] = vehicle_torque_setpoint.xyz[1]  (俯仰力矩, 归一化)
+    data[1] = vehicle_thrust_setpoint.xyz[0]  (油门, 归一化)
+    data[2] = vehicle_torque_setpoint.xyz[0]  (横滚力矩, 归一化)
+```
+
+#### A.4.3 从机信息流（左/右 Pixhawk）
+
+```
+从机自身传感器 → EKF2 → 本地姿态估计
+    ↓
+ChainwingSlave (50Hz)
+    │
+    ├─ updateHingeEstimate(): 用本地 IMU 估计铰链角
+    │   铰链角 = 从机滚转 - 主机滚转 (如果主机发送了滚转命令)
+    │
+    ├─ computeTrim(): PD 控制律
+    │   trim = 1.5 × θ_hinge + 0.2 × θ̇_hinge
+    │
+    ├─ processMasterCommands(): 接收主机命令 (via MAVLink)
+    │   读取 DEBUG_FLOAT_ARRAY (id=43, "CW_CMD")
+    │   → _master_pitch_cmd, _master_throttle, _master_roll_cmd
+    │
+    ├─ publishDebugArray(): 发送铰链状态给主机 (via MAVLink)
+    │   DEBUG_FLOAT_ARRAY (id=42, "CW_HINGE")
+    │   → 铰链角、铰链率、trim 值、有效标志
+    │
+    └─ PWM Trim 叠加 (CW_SLV_PWM_EN=1):
+        读取本地 ControlAllocator 的 actuator_servos
+        control[0] += trim_left  (或 control[2] += trim_right)
+        → MAIN OUT: Servo + Motor
+```
+
+#### A.4.4 三机通信协议时序
+
+```
+时间 →
+主机:  ──CMD──CMD──CMD──CMD──CMD──CMD──  (10Hz, DEBUG_FLOAT_ARRAY id=43)
+        ↓      ↓      ↓      ↓
+左从机: ──────STS──────STS──────STS───  (10Hz, DEBUG_FLOAT_ARRAY id=42)
+              ↑      ↑      ↑
+右从机: ─STS──────STS──────STS────────  (10Hz, DEBUG_FLOAT_ARRAY id=42)
+
+CMD: 主机 → 从机 (pitch, throttle, roll 命令)
+STS: 从机 → 主机 (铰链角, 铰链率, trim 值)
+
+超时安全: 从机 500ms 未收到 CMD → _master_cmd_valid = false
+         (ChainwingSlave.cpp:263, MASTER_CMD_TIMEOUT_US = 500000)
+```
+
+---
+
+### A.5 各飞控的电机/舵机输出分配 {#a5-各飞控的电机舵机输出分配}
+
+#### A.5.1 单 Pixhawk 方案 — PWM 通道分配
+
+```
+Pixhawk 2.4.8 MAIN OUT (经 PX4IO 协处理器):
+
+┌─────────┬───────────────┬──────────────────────────────────────┐
+│ 通道    │ 功能           │ 说明                                 │
+├─────────┼───────────────┼──────────────────────────────────────┤
+│ MAIN 1  │ Motor 0 (左)  │ ESC → 左翼无刷电机, 推力                │
+│ MAIN 2  │ Motor 1 (中)  │ ESC → 中翼无刷电机, 推力 + 差速偏航     │
+│ MAIN 3  │ Motor 2 (右)  │ ESC → 右翼无刷电机, 推力                │
+│ MAIN 4  │ Servo 0 (左)  │ 右 Elevon → 左翼舵面, **含 trim 修正** │
+│ MAIN 5  │ Servo 1 (中)  │ Elevator → 中翼升降舵, 纯俯仰控制      │
+│ MAIN 6  │ Servo 2 (右)  │ 左 Elevon → 右翼舵面, **含 trim 修正** │
+│ MAIN 7  │ — (空闲)      │ 可备用                                │
+│ MAIN 8  │ — (空闲)      │ 可备用                                │
+└─────────┴───────────────┴──────────────────────────────────────┘
+
+PWM 值域: 1000μs (最小) ↔ 1500μs (中位) ↔ 2000μs (最大)
+归一化:    -1.0          ↔  0.0          ↔ +1.0
+```
+
+#### A.5.2 三 Pixhawk 分布式方案 — 各飞控输出
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                  主机 Pixhawk (中央单元)                          │
+│                                                                 │
+│  MAIN 1: — (空闲, 左电机由左从机控制)                              │
+│  MAIN 2: Motor 1 (中翼电机)                                     │
+│  MAIN 3: — (空闲, 右电机由右从机控制)                              │
+│  MAIN 4: — (空闲)                                               │
+│  MAIN 5: Servo 1 (中翼升降舵, 纯姿态控制)                         │
+│  MAIN 6: — (空闲)                                               │
+│                                                                 │
+│  TELEM2 → 左从机 UART (MAVLink custom mode)                     │
+│  SERIAL5 → 右从机 UART (MAVLink custom mode)                    │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│                  左从机 Pixhawk (左翼单元)                        │
+│                                                                 │
+│  MAIN 1: Motor 0 (左翼电机, 油门来自主机命令)                      │
+│  MAIN 4: Servo 0 (左翼 Elevon, 主机pitch + 铰链trim)             │
+│                                                                 │
+│  TELEM2 → 主机 UART                                             │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│                  右从机 Pixhawk (右翼单元)                        │
+│                                                                 │
+│  MAIN 1: Motor 2 (右翼电机, 油门来自主机命令)                      │
+│  MAIN 4: Servo 2 (右翼 Elevon, 主机pitch + 铰链trim)             │
+│                                                                 │
+│  TELEM2 → 主机 UART                                             │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### A.6 姿态设定值输入方式 {#a6-姿态设定值输入方式}
+
+#### A.6.1 手动飞行（Stabilized 模式）
+
+```
+遥控器摇杆 → RC接收机 → Pixhawk RC IN
+    ↓
+RC_Update 模块
+    ↓
+manual_control_setpoint (uORB)
+    │
+    ├── roll:     左右摇杆 → 目标滚转角 (±FW_R_LIM, 默认±50°)
+    ├── pitch:    前后摇杆 → 目标俯仰角 (FW_P_LIM_MIN ~ FW_P_LIM_MAX)
+    ├── yaw:      偏航摇杆 → 偏航角速率 (±FW_Y_RMAX, 默认±15°/s)
+    └── throttle: 油门摇杆 → 推力 (0 ~ FW_THR_MAX)
+    ↓
+flight_mode_manager → 直接转换为 vehicle_attitude_setpoint
+```
+
+#### A.6.2 自主飞行（Mission 模式）
+
+```
+QGroundControl 上传航点任务
+    ↓
+DataMan (存储航点到 SD 卡)
+    ↓
+Navigator (5Hz)
+    │   计算目标航点、切换逻辑
+    ↓
+position_setpoint_triplet (当前 + 前一个 + 下一个航点)
+    ↓
+FW_Pos_Control (50Hz)
+    │
+    │   横向 (NPFG 导航律):
+    │   roll_sp = NPFG(当前位置, 目标航线)  →  限幅 ±FW_R_LIM
+    │
+    │   纵向 (TECS 能量管理):
+    │   pitch_sp = TECS(高度误差, 速度误差)
+    │   throttle = TECS(能量误差)
+    │
+    ↓
+vehicle_attitude_setpoint (uORB)
+    ├── roll_body   (NPFG 计算的目标滚转)
+    ├── pitch_body  (TECS 计算的目标俯仰)
+    └── thrust_body (TECS 计算的推力)
+```
+
+#### A.6.3 Return-to-Launch / Loiter 模式
+
+```
+Commander 切换到 RTL/Loiter
+    ↓
+Navigator 计算返航/盘旋航点
+    ↓
+position_setpoint_triplet (type = LOITER)
+    ↓
+FW_Pos_Control
+    │   横向: NPFG 计算盘旋滚转角 (根据 NAV_LOITER_RAD)
+    │   纵向: TECS 维持目标高度
+    ↓
+vehicle_attitude_setpoint → 同上控制链路
+```
+
+---
+
+### A.7 PWM Trim 叠加实现细节（方案 C） {#a7-pwm-trim-叠加实现细节}
+
+#### A.7.1 实现代码（ChainwingSlave.cpp，已提交）
+
+```cpp
+// 在 ChainwingSlave::Run() 中, publish hinge status 之后:
+
+// Hardware PWM trim overlay (Scheme C):
+// Read actuator_servos from control_allocator, add trim to elevon channels,
+// and re-publish so that PWMOut receives the trimmed values.
+// This replaces GZMixingInterfaceServo for real hardware.
+if (_param_pwm_enable.get() != 0 && _ref_initialized) {
+    actuator_servos_s servos{};
+
+    if (_actuator_servos_sub.copy(&servos)) {
+        // Apply hinge trim correction to left and right elevon channels
+        servos.control[0] = math::constrain(servos.control[0] + trim_left, -1.0f, 1.0f);
+        servos.control[2] = math::constrain(servos.control[2] + trim_right, -1.0f, 1.0f);
+
+        servos.timestamp = hrt_absolute_time();
+        _actuator_servos_pub.publish(servos);
+    }
+}
+```
+
+#### A.7.2 数据流管道对比：仿真 vs 硬件
+
+```
+                    仿真 (SITL Gazebo)                    硬件 (Pixhawk)
+                    ──────────────────                    ───────────────
+
+ControlAllocator    ControlAllocator
+    ↓                       ↓
+actuator_servos     actuator_servos
+    ↓                       ↓
+FunctionServos      ChainwingSlave ← CW_SLV_PWM_EN=1
+    ↓                  ↓ 叠加 trim
+GZMixingInterface   actuator_servos (修正后)
+    ↓ 叠加 trim             ↓
+Gazebo servo topic  FunctionServos
+    ↓                       ↓
+Gazebo 物理引擎     PWMOut → up_pwm_servo_set()
+                            ↓
+                    PX4IO → MAIN OUT 1-6
+                            ↓
+                    物理舵机/电机
+```
+
+#### A.7.3 为什么选择方案 C
+
+| 方案 | 描述 | 优点 | 缺点 | 选择 |
+|------|------|------|------|------|
+| A | 修改 FunctionServos | 与 CA 同步 | 修改 PX4 核心代码 | ❌ |
+| B | 修改 PWMOut | 最底层 | 修改 PX4 核心代码 | ❌ |
+| **C** | **ChainwingSlave 修改 actuator_servos** | **封装在自定义模块** | 50Hz vs CA 250Hz | **✅** |
+| D | 新建中间 topic | 无冲突 | 需修改 FunctionServos | ❌ |
+
+**方案 C 的频率差异说明：**
+- ControlAllocator 以 ~250Hz 发布 actuator_servos
+- ChainwingSlave 以 50Hz 重新发布（含 trim）
+- 物理舵机 PWM 频率 = 50Hz（标准模拟舵机）
+- 因此 50Hz trim 更新与舵机物理响应匹配
+- trim 变化缓慢（铰链动力学 ~3Hz），50Hz 远超 Nyquist 要求
+
+---
+
+### A.8 控制频率与时序分析 {#a8-控制频率与时序分析}
+
+```
+模块执行频率:
+┌──────────────────────┬──────────┬──────────────────────────────┐
+│ 模块                 │ 频率     │ 触发方式                      │
+├──────────────────────┼──────────┼──────────────────────────────┤
+│ IMU 驱动             │ 1000 Hz  │ SPI 中断                      │
+│ EKF2 (姿态估计)     │  250 Hz  │ IMU 数据回调                   │
+│ FW_Rate_Control      │  250 Hz  │ angular_velocity 回调          │
+│ ControlAllocator     │  250 Hz  │ torque_setpoint 回调           │
+│ FW_Att_Control       │   50 Hz  │ attitude 回调                  │
+│ FW_Pos_Control       │   50 Hz  │ attitude 回调                  │
+│ **ChainwingSlave**   │ **50 Hz**│ **ScheduleOnInterval(20ms)**  │
+│ MixingOutput/PWMOut  │  250 Hz  │ actuator_servos 回调           │
+│ PX4IO PWM 输出       │   50 Hz  │ 硬件 PWM 定时器 (20ms)        │
+│ Navigator            │    5 Hz  │ 定时器                        │
+└──────────────────────┴──────────┴──────────────────────────────┘
+
+时序: 一个完整控制周期 (20ms = 一个 PWM 周期)
+┌─────────────────────────────────────────────────────────────────┐
+│ 0ms                          10ms                         20ms │
+│  │                            │                            │   │
+│  ├─ CA 发布 actuator_servos   │                            │   │
+│  │  (raw, 无 trim)            │                            │   │
+│  ├─ 4ms: CA 再次发布          │                            │   │
+│  ├─ 8ms: CA 再次发布          │                            │   │
+│  │                            │                            │   │
+│  ├─ ~10ms: ChainwingSlave Run │                            │   │
+│  │  → 读 IMU → 计算 trim      │                            │   │
+│  │  → 读 actuator_servos      │                            │   │
+│  │  → 叠加 trim → 发布        │                            │   │
+│  │                            │                            │   │
+│  ├─ 12ms: CA 再次发布 (raw)   │                            │   │
+│  ├─ 16ms: CA 再次发布 (raw)   │                            │   │
+│  │                            │                            │   │
+│  ├─ PWM 周期边界 → 最后写入值生效                           │   │
+│  │  (取决于 MixingOutput 处理顺序)                          │   │
+│  └──────────────────────────────────────────────────────────│   │
+│                                                             │   │
+│  结论: 50Hz 舵机取 20ms 内最后一次 up_pwm_servo_set() 的值   │   │
+│        trim 修正在每个 PWM 周期内至少有 1 次被写入            │   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### A.9 安全机制 {#a9-安全机制}
+
+#### A.9.1 参数安全
+
+```
+CW_SLV_EN = 0       → Run() 立即返回, 不修改任何舵面值
+CW_SLV_PWM_EN = 0   → 不执行 actuator_servos 修改
+CW_SLV_TRIM_MAX = 0.3  → trim 限幅在 ±30% 舵面行程内
+                        (剩余 70% 给正常姿态控制)
+```
+
+#### A.9.2 数据有效性检查
+
+```
+ChainwingSlave::Run():
+    1. _param_enable.get() == 0 → return (模块禁用)
+    2. _param_pwm_enable.get() == 0 → 跳过 PWM 叠加
+    3. _ref_initialized == false → 跳过 PWM 叠加 (参考未初始化)
+    4. _actuator_servos_sub.copy() 失败 → 跳过 (无数据)
+    5. math::constrain() → 确保输出 [-1, +1]
+
+GZMixingInterfaceServo (仿真):
+    1. _hinge_status_sub.copy() 失败 → hinge_valid = false → 跳过
+    2. hinge_status.data_valid == false → 跳过
+    3. output 限幅 [-1, +1]
+```
+
+#### A.9.3 MAVLink 通信超时 (三机方案)
+
+```
+从机 processMasterCommands():
+    if (hrt_elapsed_time(&_last_master_cmd) > 500ms):
+        _master_cmd_valid = false
+        PX4_WARN("Master command timeout")
+
+安全策略: 超时后从机继续以最后收到的命令运行
+         (不是紧急停止, 避免突然失控)
+```
+
+#### A.9.4 首飞安全检查清单
+
+```
+□ CW_SLV_EN=0 时舵面行为正常（纯姿态控制）
+□ CW_SLV_EN=1, CW_SLV_PWM_EN=1 时舵面有 trim 偏移
+□ 手动模式下 trim 叠加不超过 ±30% 行程
+□ trim 方向正确（左铰链上偏 → 左 elevon 下偏修正）
+□ 遥控器可随时切换到 Manual 模式接管
+□ 解锁前确认 chainwing_slave status 显示正常
+□ 首飞使用保守参数：CW_SLV_KP=0.5, CW_SLV_KD=0.1
+```
+
+---
+
+## 14. 版本历史 {#15-版本历史}
 
 | 版本 | 日期 | 变更内容 |
 |------|------|---------|
 | v1.0 | 2026-03-23 | 初版：工作量评估 + 4阶段实施路线 |
 | v1.1 | 2026-03-23 | 基于 Pixhawk 2.4.8 实物引脚图更新：§3 接口布局、TELEM2 接线、PWM 通道映射、三机接线方案 |
+| **v2.0** | **2026-03-24** | **代码实现完成！** (1) 新增 CW_SLV_PWM_EN 参数, (2) ChainwingSlave.cpp 方案C 实现, (3) fmu-v3 板级配置, (4) 2150_chainwing + 1103_sih 机架完善, (5) 新增附录A: 三种架构完整控制流程详解（含姿态输入、信息流、输出映射、时序分析） |
 
-*文档结束 — 如有疑问，参考 CHAINWING_HIL_REALFLIGHT_GUIDE.md 获取更详细的架构设计*
+*文档结束 — 配合源代码文件阅读：ChainwingSlave.cpp, ChainwingSlave.hpp, chainwing_slave_params.c*

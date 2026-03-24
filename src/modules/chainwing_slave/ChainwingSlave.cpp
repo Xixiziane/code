@@ -128,7 +128,7 @@ void ChainwingSlave::Run()
 	if (_param_pwm_enable.get() != 0 && _ref_initialized) {
 		actuator_servos_s servos{};
 
-		if (_actuator_servos_sub.copy(&servos)) {
+		if (_actuator_servos_sub.copy(&servos) && hrt_elapsed_time(&servos.timestamp) < 100_ms) {
 			// Apply hinge trim correction to left and right elevon channels
 			servos.control[0] = math::constrain(servos.control[0] + trim_left, -1.0f, 1.0f);
 			servos.control[2] = math::constrain(servos.control[2] + trim_right, -1.0f, 1.0f);
