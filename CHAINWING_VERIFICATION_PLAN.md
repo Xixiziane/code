@@ -1,10 +1,11 @@
 # ChainWing 验证测试计划
 
-> **版本**: v1.0  
-> **日期**: 2026-03-24  
+> **版本**: v2.0  
+> **日期**: 2026-03-25  
 > **目标**: 系统性验证通信、基础飞控、偏航增强、从机铰链修正  
-> **平台**: Pixhawk 2.4.8 (FMU-V3) + SIH 在环仿真 / Gazebo SITL  
-> **工具**: QGC 参数修改 + 自主飞行任务 + Flight Review 回看分析
+> **平台**: Gazebo SITL (主要) / Pixhawk 2.4.8 (FMU-V3) SIH (辅助)  
+> **工具**: QGC 参数修改 + 自主飞行任务 + Flight Review 回看分析  
+> **v2.0 新增**: §12-§15 Gazebo SITL 专项验证指南（通信 + 控制律 + 操作流程 + 数据分析）
 
 ---
 
@@ -21,6 +22,10 @@
 - [§9 方法论评估与改进建议](#9-方法论评估与改进建议)
 - [§10 风险与应急预案](#10-风险与应急预案)
 - [§11 预期结果与判定标准](#11-预期结果与判定标准)
+- [§12 GZ SITL 通信验证详细指南](#12-gz-sitl-通信验证详细指南) ← **v2.0 新增**
+- [§13 GZ SITL 控制律验证详解](#13-gz-sitl-控制律验证详解) ← **v2.0 新增**
+- [§14 GZ SITL 完整操作流程](#14-gz-sitl-完整操作流程) ← **v2.0 新增**
+- [§15 GZ SITL 飞行数据深度分析](#15-gz-sitl-飞行数据深度分析) ← **v2.0 新增**
 
 ---
 
@@ -890,3 +895,854 @@ Flight Review URL: ____
 
 备注: ____
 ```
+
+---
+
+## §12 GZ SITL 通信验证详细指南
+
+> **本节专注 Gazebo SITL**。与 SIH（§3）不同，Gazebo 有完整铰链物理，能真正验证通信+修正效果。
+
+### 12.1 GZ SITL 通信架构总览
+
+```
+┌──────────────────────── PX4 进程 ────────────────────────────┐
+│                                                              │
+│  ┌──────────────┐    vehicle_angular_velocity    ┌─────────┐ │
+│  │   EKF2       │ ─────────────────────────────→ │ Chain-  │ │
+│  │  (250 Hz)    │    vehicle_attitude             │ wing    │ │
+│  │              │ ─────────────────────────────→ │ Slave   │ │
+│  └──────────────┘                                │ (50 Hz) │ │
+│                                                  │         │ │
+│  ┌──────────────┐    actuator_servos             │         │ │
+│  │  Control     │ ─────────────────────────────→ │ (PWM    │ │
+│  │  Allocator   │       (250 Hz)                 │  mode   │ │
+│  │  (250 Hz)    │                                │  only)  │ │
+│  └──────────────┘                                └────┬────┘ │
+│         │                                             │      │
+│         │ actuator_servos                             │      │
+│         │  (原始,无trim)            chainwing_hinge_status    │
+│         ↓                                             ↓      │
+│  ┌──────────────────────────────────────────────────────────┐ │
+│  │             GZMixingInterfaceServo (250 Hz)              │ │
+│  │                                                          │ │
+│  │  output = (actuator_servos[i] - 500) / 500.0             │ │
+│  │                                                          │ │
+│  │  if hinge_valid:                                         │ │
+│  │    servo_0 += trim_left     ← 左Elevon铰链修正            │ │
+│  │    servo_2 += trim_right    ← 右Elevon铰链修正            │ │
+│  │    clamp(-1.0, 1.0)                                      │ │
+│  │                                                          │ │
+│  │  Publish to Gazebo: /model/chainwing_3body/servo_{0,1,2} │ │
+│  └──────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────┘
+                              │
+                    Gazebo Transport
+                              │
+                              ↓
+         ┌──────────────────────────────────────┐
+         │   Gazebo 物理引擎 (1000 Hz)           │
+         │                                      │
+         │   servo_0 → 左Elevon LiftDrag        │
+         │   servo_1 → 中央Elevator LiftDrag     │
+         │   servo_2 → 右Elevon LiftDrag        │
+         │                                      │
+         │   hinge_left:  k=200, c=12, ±15°     │
+         │   hinge_right: k=200, c=12, ±15°     │
+         │                                      │
+         │   → IMU 传感器数据 → gz_bridge → PX4  │
+         └──────────────────────────────────────┘
+```
+
+### 12.2 关键通信路径验证
+
+**路径 A：铰链估计（输入侧）**
+
+```
+验证目标: IMU 数据 → ChainwingSlave → 铰链角估计
+
+步骤:
+1. 启动 SITL
+   make px4_sitl gz_chainwing_3body
+
+2. 在 pxh> 终端检查模块状态
+   pxh> chainwing_slave status
+
+   预期输出:
+   Chain-wing slave controller
+     Enabled: YES
+     PWM trim overlay: DISABLED (sim)     ← GZ用GZMixingInterfaceServo,不需要PWM overlay
+     Communication: DISABLED
+     Reference initialized: YES
+     Hinge angles: left=0.xxx deg, right=-0.xxx deg
+     Hinge rates:  left=0.xxx, right=-0.xxx rad/s
+     PD gains: Kp=1.50, Kd=0.20, max_trim=0.30
+
+   ⚠️ 关键确认:
+   - PWM trim overlay: DISABLED (sim)  ← 这是正确的！GZ不用PWM overlay
+   - Reference initialized: YES         ← 互补滤波器已初始化
+   - Hinge angles 不为0                  ← 有真实铰链变形
+
+3. 监听铰链状态
+   pxh> listener chainwing_hinge_status -n 5
+
+   预期:
+   - hinge_angle_left/right: 小值 (±0.01~0.05 rad 静态, 转弯时更大)
+   - hinge_rate_left/right: 随运动变化
+   - trim_left/right: = KP * angle + KD * rate
+   - data_valid: true
+```
+
+**路径 B：Trim 叠加（输出侧）— GZ 专用路径**
+
+```
+验证目标: chainwing_hinge_status → GZMixingInterfaceServo → Gazebo servo topic
+
+代码位置: src/modules/simulation/gz_bridge/GZMixingInterfaceServo.cpp:62-86
+
+关键代码（已验证）:
+  Line 63: bool hinge_valid = _hinge_status_sub.copy(&hinge_status) && hinge_status.data_valid;
+  Line 77: if (i == 0) output += (double)hinge_status.trim_left;
+  Line 79: if (i == 2) output += (double)hinge_status.trim_right;
+
+验证方法:
+  pxh> listener actuator_servos -n 3     # 控制分配器原始输出
+  
+  # 对比: Gazebo 端的实际舵面输入
+  # 终端2:
+  gz topic -e /model/chainwing_3body/servo_0  # 左Elevon (应 = 原始 + trim_left)
+  gz topic -e /model/chainwing_3body/servo_1  # 中央Elevator (应 = 原始, 无修正)
+  gz topic -e /model/chainwing_3body/servo_2  # 右Elevon (应 = 原始 + trim_right)
+  
+  如果 servo_0 ≠ actuator_servos.control[0] (差值 ≈ trim_left)，
+  则通信路径正确 ✅
+```
+
+**路径 C：MAVLink 通信验证（可选,用于多实例）**
+
+```
+验证目标: DEBUG_FLOAT_ARRAY 在 SITL 多实例间传输
+
+步骤:
+1. 启用通信
+   pxh> param set CW_SLV_COMM_EN 1
+
+2. 启动 MAVLink custom 实例
+   pxh> mavlink start -x -u 24550 -o 24551 -r 4000 -m custom
+   pxh> mavlink stream -u 24550 -s DEBUG_FLOAT_ARRAY -r 10
+
+   ⚠️ 必须用 -m custom！不要用 -m onboard！
+   原因: onboard 模式包含 ODOMETRY@30Hz，
+         ODOMETRY.hpp:140 硬编码 estimator_type=8
+         → mavlink_receiver.cpp:1429 拒绝 → 60次/秒警告刷屏
+
+3. 监听 debug_array
+   pxh> listener debug_array -n 3
+   
+   预期: id=42, name="CW_HINGE", data[0-6] 有值
+```
+
+### 12.3 GZ SITL vs SIH 通信差异速查
+
+| 维度 | Gazebo SITL | SIH |
+|------|-------------|-----|
+| **铰链物理** | ✅ 完整（k=200, c=12, ±15°）| ❌ 无（单刚体） |
+| **铰链角** | 真实值（转弯时可达 ±5°）| ≈ 0（噪声级别）|
+| **trim 输出** | 有实际修正量（±0.05~0.15）| ≈ 0 |
+| **Trim 叠加路径** | GZMixingInterfaceServo | CW_SLV_PWM_EN=1 |
+| **CW_SLV_PWM_EN** | = 0（关闭）| = 1（启用）|
+| **验证价值** | ⭐⭐⭐ 完整验证 | ⭐ 仅通信链路 |
+
+---
+
+## §13 GZ SITL 控制律验证详解
+
+### 13.1 偏航控制完整链路（5 层追踪）
+
+```
+       ┌─────────── 第 1 层: 任务/手动输入 ──────────────┐
+       │                                                 │
+       │  自主模式: navigator → heading_setpoint          │
+       │  手动模式: RC yaw stick → FW_Y_RMAX × stick     │
+       │                                                 │
+       └──────────────────┬──────────────────────────────┘
+                          ↓
+       ┌─────────── 第 2 层: 姿态控制器 ─────────────────┐
+       │  文件: FixedwingAttitudeControl.cpp              │
+       │                                                 │
+       │  协调转弯: ω_yaw = tan(φ)·cos(θ)·g / V         │
+       │    → ecl_yaw_controller.cpp:88                  │
+       │                                                 │
+       │  航向保持:                                       │
+       │    heading_error = ψ_sp - ψ_actual              │
+       │    V_ratio = V / max(V_trim, 1.0)               │
+       │    K_scaled = FW_YAW_STAB_SC × V_ratio²         │
+       │    ω_correction = heading_error × K_scaled       │
+       │    → ecl_yaw_controller.cpp:109-120             │
+       │                                                 │
+       │  输出: yaw_rate_setpoint (rad/s)                 │
+       └──────────────────┬──────────────────────────────┘
+                          ↓
+       ┌─────────── 第 3 层: 角速率控制器 ───────────────┐
+       │  文件: rate_control.cpp:78                       │
+       │                                                 │
+       │  τ_yaw = FW_YR_P × e_r                          │
+       │        + I_state                                 │
+       │        - FW_YR_D × angular_accel_z               │
+       │        + FW_YR_FF × r_sp                         │
+       │                                                 │
+       │  其中: e_r = r_sp - r_actual                     │
+       │                                                 │
+       │  空速缩放: V_scale = V_trim / max(V, V_min)     │
+       │  τ_yaw_scaled = τ_yaw × V_scale²                │
+       │    → FixedwingRateControl.cpp:372                │
+       │                                                 │
+       │  滚转-偏航耦合前馈:                               │
+       │  τ_yaw += FW_RLL_TO_YAW_FF × τ_roll             │
+       │    → FixedwingRateControl.cpp:412                │
+       │                                                 │
+       │  输出: vehicle_torque_setpoint.xyz[2]            │
+       └──────────────────┬──────────────────────────────┘
+                          ↓
+       ┌─────────── 第 4 层: 控制分配 ───────────────────┐
+       │  文件: ActuatorEffectivenessControlSurfaces.cpp  │
+       │                                                 │
+       │  效率矩阵:                                       │
+       │  ┌──────────┬───────┬───────┬───────┐           │
+       │  │ 通道     │ Roll  │ Pitch │ Yaw   │           │
+       │  ├──────────┼───────┼───────┼───────┤           │
+       │  │ CS0(LEv) │ +0.5  │ +0.5  │  0.0  │           │
+       │  │ CS1(Ele) │  0.0  │ +1.0  │  0.0  │           │
+       │  │ CS2(REv) │ -0.5  │ +0.5  │  0.0  │           │
+       │  └──────────┴───────┴───────┴───────┘           │
+       │                                                 │
+       │  注: Yaw 列全为 0 → 偏航完全靠差动推力！          │
+       │  S0 = 0.5×τ_roll + 0.5×τ_pitch                  │
+       │  S1 = τ_pitch                                    │
+       │  S2 = -0.5×τ_roll + 0.5×τ_pitch                 │
+       └──────────────────┬──────────────────────────────┘
+                          ↓
+       ┌─────────── 第 5 层: 铰链修正叠加 ───────────────┐
+       │  文件: GZMixingInterfaceServo.cpp:76-86          │
+       │                                                 │
+       │  servo_0_final = servo_0_raw + trim_left         │
+       │  servo_1_final = servo_1_raw (无修正)             │
+       │  servo_2_final = servo_2_raw + trim_right        │
+       │                                                 │
+       │  其中: trim = CW_SLV_KP × θ_hinge               │
+       │             + CW_SLV_KD × θ̇_hinge               │
+       │  → ChainwingSlave.cpp:224-234                    │
+       └─────────────────────────────────────────────────┘
+```
+
+### 13.2 四轮测试的控制律参数矩阵（GZ SITL 专用）
+
+> ⚠️ **重要**: GZ SITL 机架 `4008_gz_chainwing_3body` 的默认参数与 PX4 默认值不同！
+> 以下标注的"机架默认"是指 SITL 机架文件中的设定值。
+
+| 参数 | PX4 默认 | 机架默认 | 第2轮(基线) | 第3轮A | 第3轮B | 第3轮C | 第3轮D |
+|------|---------|---------|-----------|-------|-------|-------|-------|
+| **FW_YR_P** | 0.05 | **0.6** | 0.05 | 0.15 | 0.3 | 0.6 | 最优P |
+| **FW_YR_I** | 0.1 | **0.5** | 0.1 | 0.1 | 0.1 | 0.5 | 0.5 |
+| **FW_YR_D** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.005~0.02 |
+| **FW_YR_FF** | 0.3 | **0.5** | 0.3 | 0.3 | 0.3 | 0.5 | 0.5 |
+| **FW_YAW_STAB_SC** | 0.0 | **1.0** | 0.0 | 0.0 | 0.0 | 1.0 | 1.0 |
+| **FW_RR_P** | 0.05 | **0.3** | 0.3 | 0.3 | 0.3 | 0.3 | 0.3 |
+| **FW_PR_P** | 0.08 | **0.9** | 0.9 | 0.9 | 0.9 | 0.9 | 0.9 |
+| **CW_SLV_EN** | 1 | 1 | **0** | 0 | 0 | 0 | 0 |
+| **CW_SLV_KP** | 1.5 | 1.5 | - | - | - | - | - |
+| **CW_SLV_KD** | 0.2 | 0.2 | - | - | - | - | - |
+
+> **策略**: 第 2 轮用 PX4 默认值建立基线 → 第 3 轮逐步增大 → 第 3C 轮使用机架文件值
+
+### 13.3 每个偏航参数的物理含义与调参建议
+
+**FW_YR_P（偏航角速率比例增益）— 代码: rate_control.cpp:78**
+
+```
+作用: τ_P = FW_YR_P × (yaw_rate_sp - yaw_rate_actual)
+
+物理含义:
+  - 偏航角速率误差 1 rad/s 时，产生多大的差动推力力矩
+  - PX4默认 0.05：假设有垂尾，1 rad/s误差只需5%推力差
+  - ChainWing 设 0.6：无垂尾，需要12×差动推力补偿
+
+调参原则:
+  太小 → 偏航响应迟缓，转弯侧滑大，直线漂移
+  太大 → 偏航振荡，电机反复加减速（听到嗡嗡声）
+  
+Gazebo 观察:
+  - 打开 pxh> listener vehicle_torque_setpoint -r 2
+  - 观察 xyz[2] (偏航力矩)，应在 ±0.3 范围内
+  - 如果持续 > 0.5 → P 可能过大
+```
+
+**FW_YR_I（偏航角速率积分增益）— 代码: rate_control.cpp:107-111**
+
+```
+作用: 消除稳态偏航速率偏差（如侧风导致的持续偏航）
+
+物理含义:
+  - 不为0时：长时间偏航误差会累积，逐渐增大修正量
+  - 机架默认 0.5（比PX4默认0.1高5×）→ 快速消除稳态偏差
+  
+注意:
+  - I 项有 IMAX 限制（FW_YR_IMAX=0.2），防止饱和
+  - rate_control.cpp:107 的 i_factor 在大误差时自动减弱 I 增益:
+    i_factor = max(0, 1 - (error/400°)²)
+    这防止了大误差时积分饱和的"windup"问题
+    
+调参建议:
+  第 2 轮保持 0.1（保守），第 3C 轮改为 0.5（机架值）
+```
+
+**FW_YR_D（偏航角速率微分增益）— 代码: rate_control.cpp:78**
+
+```
+作用: τ_D = -FW_YR_D × angular_acceleration_z
+
+物理含义:
+  - 注意负号！抑制偏航角加速度（不是角速率微分）
+  - 当偏航加速过快时（如 P 项过激），D 项产生反向力矩
+  - 效果 = 偏航运动的"阻尼器"
+
+代码细节 (rate_control.cpp:78):
+  torque = P*error + I_state - D*angular_accel + FF*rate_sp
+                               ↑ 负号在这里
+
+为什么 PX4 默认 D=0?
+  - 角加速度信号噪声大（陀螺仪二阶导数）
+  - 对于有垂尾的飞机，被动气动阻尼足够
+  - ChainWing 无垂尾，如果 P 过大导致超调，D 项有意义
+
+调参建议:
+  - 如果 FW_YR_P=0.3 时有超调 > 15% → 先试 FW_YR_D=0.005
+  - 如果 FW_YR_P=0.6 时有超调 > 25% → 试 FW_YR_D=0.01~0.02
+  - ⚠️ 不要超过 0.05！否则噪声放大导致高频抖动
+  - Flight Review 判断: Yaw Rate 图中是否有高频毛刺
+```
+
+**FW_YR_FF（偏航角速率前馈）— 代码: rate_control.cpp:78**
+
+```
+作用: τ_FF = FW_YR_FF × yaw_rate_setpoint
+
+物理含义:
+  - 不等误差反馈，直接根据设定值产生力矩
+  - 提高跟踪速度，减少延迟
+  - PX4默认 0.3, 机架设 0.5 → 更快的偏航响应
+
+调参建议:
+  - FF 与 P 配合：P 负责纠偏，FF 负责跟踪
+  - 如果 P 增大后偏航响应够快但超调，不应再增 FF
+  - 如果 P 不大但需要更快响应 → 增 FF 比增 P 更安全
+```
+
+**FW_YAW_STAB_SC（航向保持增益）— 代码: ecl_yaw_controller.cpp:109-120**
+
+```
+作用: ω_correction = FW_YAW_STAB_SC × heading_error × (V/V_trim)²
+
+物理含义:
+  - 在直线飞行时，额外施加偏航力矩保持航向
+  - 与协调转弯公式叠加（不替代）
+  - 空速²缩放: 低速时自动减弱（防止着陆时过度修正）
+  
+数值示例 (V=20m/s, V_trim=20m/s):
+  heading_error = 5° = 0.087 rad
+  FW_YAW_STAB_SC = 1.0
+  V_ratio = 20/20 = 1.0
+  ω_correction = 1.0 × 0.087 × 1.0² = 0.087 rad/s
+  
+  heading_error = 5° = 0.087 rad
+  FW_YAW_STAB_SC = 1.0
+  V = 15m/s (着陆)
+  V_ratio = 15/20 = 0.75
+  V_ratio² = 0.75² = 0.5625
+  ω_correction = 1.0 × 0.087 × 0.5625 = 0.049 rad/s ← 低速时自动减弱
+
+GZ 验证:
+  第 2 轮: FW_YAW_STAB_SC=0 → 观察直线段航向漂移
+  第 3C 轮: FW_YAW_STAB_SC=1.0 → 观察漂移是否改善
+```
+
+### 13.4 铰链修正控制律详解（第 4 轮专用）
+
+```
+┌──── ChainwingSlave::Run() [50 Hz] ────────────────────────┐
+│                                                            │
+│  1. 更新铰链角估计 (updateHingeEstimate)                    │
+│     ├─ 读取 IMU: roll_rate = angular_vel.xyz[0]            │
+│     ├─ 低通滤波: α = dt / (dt + 1/(2π·LP_FREQ))           │
+│     │   rate_filtered = (1-α)·rate_old + α·rate_new        │
+│     ├─ 积分+衰减: angle = e^(-dt/τ) · (angle + rate·dt)   │
+│     │   τ = 2.0s (互补滤波时间常数)                         │
+│     └─ 姿态校正: angle = 0.98·angle + 0.02·roll_error     │
+│                                                            │
+│  2. 计算 trim (computeTrim)                                 │
+│     trim = KP × angle + KD × rate                          │
+│     trim = clamp(trim, -TRIM_MAX, +TRIM_MAX)               │
+│                                                            │
+│  3. 发布 hinge_status → GZMixingInterfaceServo              │
+│                                                            │
+│  数值示例 (5° = 0.087 rad 铰链偏转):                        │
+│     trim = 1.5 × 0.087 + 0.2 × 0.05                       │
+│          = 0.131 + 0.01 = 0.141 (14.1%)                    │
+│                                                            │
+│     转换为舵面偏转:                                         │
+│     左Elevon: servo_0 += 0.141 → ≈ 0.141 × 30° = 4.2°     │
+│     右Elevon: servo_2 += trim_right (对称反向)              │
+└────────────────────────────────────────────────────────────┘
+
+潜在问题分析:
+
+  问题1: 互补滤波器漂移
+    原因: 单IMU无法直接测量铰链角，依赖积分
+    症状: 静态飞行中 hinge_angle 缓慢增大
+    观察: listener chainwing_hinge_status -n 10
+    判断: 直线段 angle > 0.1 rad (5.7°) 且持续增长 → 有漂移
+    解决: 降低 cf_alpha (0.02→0.05，更信任姿态)
+
+  问题2: 修正方向反转
+    原因: 铰链变形方向假设错误
+    症状: 启用修正后滚转偏差更大（CW_SLV_EN=1 比 =0 更差）
+    判断: Flight Review 对比 Roll RMSE
+    解决: 交换 trim_left 和 trim_right（代码修改）
+
+  问题3: 高频振荡
+    原因: KP 过大，采样延迟导致相位裕度不足
+    症状: Actuator Controls 图中 servo_0/servo_2 有 >5Hz 振荡
+    判断: 频谱分析（PlotJuggler FFT 功能）
+    解决: 降低 KP (1.5→0.5) 或增加 LP_FREQ 滤波
+```
+
+### 13.5 差动推力偏航控制的物理限制
+
+```
+ChainWing 偏航控制 = 差动推力（无垂尾！）
+
+三个电机位置:
+  Motor 0: Y = -1.2m (左)
+  Motor 1: Y =  0.0m (中,无偏航贡献)
+  Motor 2: Y = +1.2m (右)
+  
+最大偏航力矩 = (T_max - T_min) × 1.2m
+  假设 T_max = 15N, T_min = 5N
+  → τ_yaw_max = 10 × 1.2 = 12 N·m
+  
+vs 有垂尾飞机:
+  典型垂尾: τ_yaw ≈ 0.5 × ρ × V² × S_vt × l_vt × C_Lα × δ_r
+  在 20m/s: τ_yaw ≈ 25~50 N·m
+
+结论: ChainWing 差动推力力矩 < 有垂尾的 1/3
+  → 需要更大的 FW_YR_P 补偿
+  → FW_YR_P = 0.6 (12× 默认) 是合理的
+  → 但差动推力响应时间 > 舵面响应（电机加减速惯性）
+  → 这是超调的物理根源
+```
+
+---
+
+## §14 GZ SITL 完整操作流程
+
+### 14.1 准备工作
+
+```bash
+# ═══════════════════════════════════════════════════════════
+# 第 0 步: 确认环境
+# ═══════════════════════════════════════════════════════════
+
+# 1. 确认 QGC 已安装并启动
+#    QGC 会自动连接 SITL（UDP 14550）
+
+# 2. 确认 Gazebo 环境
+which gz  # 应返回 gz 路径
+
+# 3. 进入 PX4 目录
+cd /path/to/PX4-Autopilot
+```
+
+### 14.2 第 2 轮：基线飞行操作流程
+
+```bash
+# ═══════════════════════════════════════════════════════════
+# 第 2 轮: 基线飞行 — 验证无 Yaw 增强时的飞行可行性
+# ═══════════════════════════════════════════════════════════
+
+# 1. 启动 SITL
+make px4_sitl gz_chainwing_3body
+
+# 2. 等待 "Ready for takeoff" 或 QGC 显示连接
+#    pxh> 会出现
+
+# 3. 在 pxh> 终端修改参数（覆盖机架默认值）
+param set FW_YR_P 0.05        # PX4 默认（机架文件=0.6）
+param set FW_YR_I 0.1         # PX4 默认（机架文件=0.5）
+param set FW_YR_FF 0.3        # PX4 默认（机架文件=0.5）
+param set FW_YAW_STAB_SC 0.0  # 关闭航向保持（机架文件=1.0）
+param set CW_SLV_EN 0         # 关闭铰链修正
+
+# 4. 验证参数已生效
+param show FW_YR_P             # 应显示 0.0500
+param show CW_SLV_EN           # 应显示 0
+
+# 5. 在 QGC 中规划矩形航线
+#    Plan View > Add Waypoint
+#    WP1: 起飞位置北 200m
+#    WP2: WP1 西 100m
+#    WP3: WP2 南 200m
+#    WP4: WP3 东 100m（回起飞位置上方）
+#    高度: 50m, 速度: 20m/s
+#    
+#    设置: Takeoff → Waypoints → Land
+
+# 6. 上传任务
+#    QGC: Plan > Upload (右上角)
+
+# 7. 解锁并起飞
+#    QGC: Fly View > Slide to Arm > Confirm Takeoff
+#    或 pxh>:
+commander takeoff
+
+# 8. 观察飞行
+#    QGC 地图: 关注航迹偏离
+#    实时参数: 随时可在 pxh> 调整
+
+# 9. 飞行中监控（可选,另开终端窗口）
+listener vehicle_attitude -r 2   # 实时姿态
+listener vehicle_angular_velocity -r 2  # 实时角速率
+
+# 10. 着陆后下载日志
+#     QGC > Analyze > Log Download > 选最新的 .ulg
+#     或: 日志保存在 build/px4_sitl_default/rootfs/log/
+
+# 11. 上传到 Flight Review
+#     打开 https://review.px4.io/upload
+#     拖放 .ulg 文件
+#     保存 URL
+
+# 12. 记录结果
+#     用 §A.3 模板填写
+```
+
+### 14.3 第 3 轮：Yaw P 增强操作流程
+
+```bash
+# ═══════════════════════════════════════════════════════════
+# 第 3A 轮: FW_YR_P = 0.15
+# ═══════════════════════════════════════════════════════════
+
+# 不需要重启 SITL！直接在 pxh> 修改参数：
+param set FW_YR_P 0.15
+
+# 飞同一航线 → 着陆 → 保存日志 → 上传 Flight Review
+
+# ═══════════════════════════════════════════════════════════
+# 第 3B 轮: FW_YR_P = 0.3
+# ═══════════════════════════════════════════════════════════
+
+param set FW_YR_P 0.3
+
+# 飞同一航线 → 着陆 → 保存日志 → 上传 Flight Review
+
+# ═══════════════════════════════════════════════════════════
+# 第 3C 轮: FW_YR_P = 0.6 + 机架文件完整参数
+# ═══════════════════════════════════════════════════════════
+
+param set FW_YR_P 0.6
+param set FW_YR_I 0.5          # 恢复机架文件值
+param set FW_YR_FF 0.5         # 恢复机架文件值
+param set FW_YAW_STAB_SC 1.0   # 启用航向保持
+
+# 飞同一航线 → 着陆 → 保存日志 → 上传 Flight Review
+
+# ═══════════════════════════════════════════════════════════
+# 第 3D 轮: 加 D 控制（仅在超调 > 15% 时）
+# ═══════════════════════════════════════════════════════════
+
+# 保持 3C 的参数，额外加 D
+param set FW_YR_D 0.005        # 从小值开始
+
+# 飞同一航线 → 在 Flight Review 检查超调是否减少
+# 如果效果不明显:
+param set FW_YR_D 0.01
+
+# 如果仍不够:
+param set FW_YR_D 0.02
+
+# ⚠️ 判断 D 是否过大: 看 Yaw Rate 图是否有高频毛刺
+```
+
+### 14.4 第 4 轮：铰链修正操作流程
+
+```bash
+# ═══════════════════════════════════════════════════════════
+# 第 4 轮: 启用铰链修正（在第 3 轮最优参数基础上）
+# ═══════════════════════════════════════════════════════════
+
+# 保持第 3 轮最优偏航参数不变！
+
+# 1. 启用铰链修正
+param set CW_SLV_EN 1
+
+# 2. 确认模块状态
+chainwing_slave status
+# 预期: Enabled: YES, Reference initialized: YES
+
+# 3. 确认 CW_SLV_PWM_EN = 0（GZ 不需要 PWM overlay）
+param show CW_SLV_PWM_EN      # 应为 0
+
+# 4. 飞矩形航线（CW_SLV_EN=1）
+# 特别关注:
+#   - 转弯时 hinge_angle 变化
+#   - 转弯后 hinge_angle 恢复速度
+#   - 滚转跟踪精度是否改善
+
+# 5. 着陆后，立即做对比测试
+param set CW_SLV_EN 0          # 关闭修正
+# 再飞一次完全相同的航线
+
+# 6. 两次日志上传 Flight Review，用对比功能:
+#    https://review.px4.io/plot_app/compare?log1=XXX&log2=YYY
+
+# 7. 如果修正导致问题:
+param set CW_SLV_KP 0.5        # 降低增益
+# 或
+param set CW_SLV_TRIM_MAX 0.1  # 限制修正幅度
+# 再测试
+
+# 8. PD 参数调优（如需要）:
+#    KP 过大 → 高频振荡 → 降低 KP
+#    KP 过小 → 无效果 → 增加 KP
+#    KD 过大 → 对噪声敏感 → 降低 KD
+#    KD 过小 → 铰链角超调 → 增加 KD
+```
+
+### 14.5 Stabilized 模式手动激励操作（强烈推荐！）
+
+```
+⭐⭐⭐ 重要: 每轮增加一段 Stabilized 手动飞行，
+     用于 Flight Review 步阶响应分析！
+
+步骤:
+  1. 完成自主航线后，在空中切换模式:
+     QGC > Fly View > 飞行模式选择器 > Stabilized
+     
+  2. 用遥控器（或QGC虚拟摇杆）做偏航激励:
+     a. 快速打满右偏航杆 → 保持2秒 → 回中
+     b. 等稳定 3 秒
+     c. 快速打满左偏航杆 → 保持2秒 → 回中
+     d. 等稳定 3 秒
+     e. 重复 a-d 共 3 次
+     
+  3. 做滚转激励:
+     a. 快速打满右滚杆 → 保持1秒 → 回中
+     b. 等稳定 2 秒
+     c. 快速打满左滚杆 → 保持1秒 → 回中
+     d. 等稳定 2 秒
+     
+  4. 切回 Mission 模式降落:
+     QGC > Fly View > Mission
+
+为什么这很重要:
+  Flight Review 的 "Step Response" 分析需要阶跃输入！
+  自主飞行使用平滑设定值 → 步阶响应显示 "0"
+  Stabilized 手动操作能产生明确的阶跃信号
+  → 可计算出: 响应时间、超调量、调节时间
+```
+
+---
+
+## §15 GZ SITL 飞行数据深度分析
+
+### 15.1 Flight Review 详细分析流程
+
+**每次飞行必须检查的 8 项指标**:
+
+```
+1. Attitude > Yaw ⚡ 最重要
+   ┌────────────────────────────────────────────┐
+   │  蓝线: yaw setpoint (设定值)                │
+   │  红线: yaw actual (实际值)                  │
+   │                                            │
+   │  检查项:                                    │
+   │  a. 直线段: 红蓝重合? 差距 < 5°?            │
+   │  b. 转弯段: 红线超调幅度?                    │
+   │  c. 转弯后: 恢复到重合的时间?                │
+   │  d. 有无持续振荡?                           │
+   └────────────────────────────────────────────┘
+
+2. Rate Tracking > Yaw Rate
+   ┌────────────────────────────────────────────┐
+   │  检查项:                                    │
+   │  a. 跟踪延迟（红线落后蓝线多少ms?）         │
+   │  b. 高频噪声（如果有毛刺 → D 过大）         │
+   │  c. 饱和（如果红线被截断 → P 或 FF 过大）    │
+   └────────────────────────────────────────────┘
+
+3. Attitude > Roll
+   ┌────────────────────────────────────────────┐
+   │  检查项:                                    │
+   │  a. 第4轮 vs 第3轮: 滚转跟踪是否更紧密?     │
+   │  b. 转弯时滚转超调是否减少?                  │
+   │  c. 有无铰链修正引入的异常振荡?              │
+   └────────────────────────────────────────────┘
+
+4. Actuator Controls > Motors
+   ┌────────────────────────────────────────────┐
+   │  检查项:                                    │
+   │  a. Motor 0 和 Motor 2 差异（差动推力）      │
+   │  b. 差动推力幅度是否合理 (< 30%)?            │
+   │  c. 持续 > 50% 差异 → 推力不足，需检查       │
+   └────────────────────────────────────────────┘
+
+5. Actuator Controls > Servos
+   ┌────────────────────────────────────────────┐
+   │  检查项:                                    │
+   │  a. servo_0 和 servo_2 是否含 trim 偏移?     │
+   │  b. 第4轮: servo_0/2 活动量 vs 第3轮比较     │
+   │  c. 是否有持续饱和 (±1.0)?                   │
+   │  d. 高频振荡（> 5Hz）→ KP 过大               │
+   └────────────────────────────────────────────┘
+
+6. GPS Track (Position)
+   ┌────────────────────────────────────────────┐
+   │  检查项:                                    │
+   │  a. 矩形航线是否方正? 还是圆角过大?          │
+   │  b. 直线段偏离量                             │
+   │  c. 第3轮 vs 第2轮: 航迹是否更精确?          │
+   └────────────────────────────────────────────┘
+
+7. Airspeed
+   ┌────────────────────────────────────────────┐
+   │  检查项:                                    │
+   │  a. 巡航速度是否稳定在 20 m/s?               │
+   │  b. 转弯时空速波动（影响偏航增益缩放）       │
+   │  c. 着陆段空速不应低于 15 m/s                │
+   └────────────────────────────────────────────┘
+
+8. Step Response (仅 Stabilized 模式段有效)
+   ┌────────────────────────────────────────────┐
+   │  Status 页面 > Step Response                │
+   │                                            │
+   │  a. Yaw step response time: 目标 < 2s      │
+   │  b. Roll step response time: 目标 < 0.5s   │
+   │  c. Pitch step response time: 目标 < 0.5s  │
+   │                                            │
+   │  如果显示 "0" → 该段无阶跃事件（正常）      │
+   └────────────────────────────────────────────┘
+```
+
+### 15.2 PlotJuggler 深度分析（chainwing_hinge_status 专用）
+
+```
+Flight Review 无法显示自定义 topic！
+chainwing_hinge_status 只能用 PlotJuggler 或 pyulog 分析。
+
+方法 1: pyulog 命令行
+  pip install pyulog
+  ulog2csv your_flight.ulg
+  
+  生成的 CSV 文件中找:
+  your_flight_chainwing_hinge_status_0.csv
+  
+  列: timestamp, hinge_angle_left, hinge_angle_right,
+      hinge_rate_left, hinge_rate_right,
+      trim_left, trim_right, data_valid
+
+方法 2: PlotJuggler GUI
+  安装: https://github.com/facontidavide/PlotJuggler
+  或: sudo snap install plotjuggler
+  
+  使用:
+  1. File > Load data > 选 .ulg 文件（需 PX4 ULog 插件）
+     或加载 CSV 文件
+  2. 拖拽变量到绘图区
+  3. 推荐叠加:
+     - hinge_angle_left + vehicle_attitude.roll
+     - trim_left + actuator_controls_0[0] (servo0)
+     - hinge_rate_left 的频谱（右键 > FFT）
+```
+
+### 15.3 GZ SITL 特有的实时监控方法
+
+```
+Gazebo SITL 比 SIH/实机多一个优势: Gazebo 端有独立观察手段
+
+方法 1: Gazebo GUI
+  - 3D 视图直观观察铰链变形
+  - 如果看到翼尖明显翘起/下垂 → 铰链物理正常
+  - Inspector 面板: 查看铰链角实时值
+
+方法 2: Gazebo topic 监听
+  # 终端（PX4外另开）
+  gz topic -l                                      # 列出所有 topic
+  gz topic -e /model/chainwing_3body/servo_0       # 左Elevon 实际输出
+  gz topic -e /model/chainwing_3body/joint_state    # 铰链关节状态
+  
+方法 3: PX4 pxh> 实时监听
+  # 每2秒打印一次铰链状态
+  listener chainwing_hinge_status -r 2
+  
+  # 实时姿态
+  listener vehicle_attitude -r 2
+  
+  # 实时舵面输出
+  listener actuator_servos -r 2
+  
+  # 偏航力矩输出
+  listener vehicle_torque_setpoint -r 2
+```
+
+### 15.4 数据对比分析模板
+
+```
+═══════════════════════════════════════════════════════════════
+            四轮测试结果对比总表
+═══════════════════════════════════════════════════════════════
+
+                    第2轮    第3A轮   第3B轮   第3C轮   第4轮
+                    基线     P=0.15  P=0.3   P=0.6   +修正
+─────────────────────────────────────────────────────────────
+FW_YR_P            0.05     0.15    0.3     0.6     0.6
+FW_YR_D            0.0      0.0     0.0     0.0     0.0
+FW_YAW_STAB_SC     0.0      0.0     0.0     1.0     1.0
+CW_SLV_EN          0        0       0       0       1
+─────────────────────────────────────────────────────────────
+直线偏航偏差(°)     ___      ___     ___     ___     ___
+转弯偏航超调(°)     ___      ___     ___     ___     ___
+转弯恢复时间(s)     ___      ___     ___     ___     ___
+Roll RMSE(°)       ___      ___     ___     ___     ___
+GPS 航迹偏差(m)     ___      ___     ___     ___     ___
+步阶响应时间(s)     ___      ___     ___     ___     ___
+Flight Review URL   ___      ___     ___     ___     ___
+═══════════════════════════════════════════════════════════════
+
+结论:
+  最优偏航参数: FW_YR_P = ___, FW_YR_D = ___
+  航向保持: FW_YAW_STAB_SC = ___
+  铰链修正效果: □改善 ___% / □无效果 / □恶化 ___%
+  建议: ___
+═══════════════════════════════════════════════════════════════
+```
+
+### 15.5 常见问题诊断表
+
+| 现象 | 可能原因 | Flight Review 判断 | 解决方案 |
+|------|---------|-------------------|---------|
+| 直线段缓慢偏航漂移 | FW_YR_P 太小 or FW_YAW_STAB_SC=0 | Yaw: setpoint-actual 持续偏差 | 增加 FW_YR_P 或启用航向保持 |
+| 转弯后偏航大幅超调 | FW_YR_P 太大 | Yaw: 尖锐的过冲脉冲 | 降低 FW_YR_P 或加 FW_YR_D |
+| 高频偏航抖动 | FW_YR_D 太大 or KP 太大 | Yaw Rate: 高频毛刺 | 降低 FW_YR_D 或 CW_SLV_KP |
+| 差动推力饱和 | 偏航力矩需求 > 电机能力 | Motors: Motor0 和 Motor2 持续在极值 | 降低 FW_YR_P，增加 FW_YR_FF |
+| 铰链修正导致振荡 | CW_SLV_KP 过大 | Servos: servo_0/2 有周期振荡 | 降低 CW_SLV_KP (1.5→0.5) |
+| 铰链修正无效果 | 铰链角估计漂移 | hinge_angle 持续单方向增大 | 检查互补滤波 cf_alpha |
+| 着陆时偏航失控 | 低速下差动推力不足 | 着陆段 Yaw 大幅偏离 | 增加 FW_YR_FF 着陆前预减速 |
+| servo 饱和 | trim + 控制分配超出[-1,1] | Servos: 值被截断在 ±1.0 | 降低 CW_SLV_TRIM_MAX |
+
+---
+
+## §16 版本历史
+
+| 版本 | 日期 | 变更 |
+|------|------|------|
+| v1.0 | 2026-03-24 | 初始版本: 四轮递进测试计划（SIH+Gazebo） |
+| v2.0 | 2026-03-25 | 新增 §12-§15: GZ SITL 专项验证指南（通信架构图、控制律详解、操作流程、深度分析） |
