@@ -67,6 +67,7 @@ ChainwingSlave::ChainwingSlave() :
 bool ChainwingSlave::init()
 {
 	ScheduleOnInterval(20000_us); // 50 Hz
+	PX4_INFO("chainwing_slave started (50Hz), CW_SLV_EN=%d", _param_enable.get());
 	return true;
 }
 
@@ -367,7 +368,7 @@ Master → Slave (id=43, name="CW_CMD"):
   data[1]: throttle (normalized [0, 1])
   data[2]: roll command (normalized [-1, 1])
 
-Requires: mavlink start -d /dev/ttyS2 -b 921600 -m onboard
+Requires: mavlink start -d /dev/ttyS2 -b 921600 -m custom
 
 ### Control Law
   δ_trim = Kp × θ_hinge + Kd × θ̇_hinge

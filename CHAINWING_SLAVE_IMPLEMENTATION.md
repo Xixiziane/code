@@ -618,7 +618,7 @@ param set CW_SLV_EN 0
 
 通过 GZ Topic Echo 可以查看铰链关节状态：
 ```bash
-gz topic -e -t /model/chainwing_3body/joint_state
+gz topic -e -t /model/chainwing_3body_0/joint_state
 ```
 
 ---
@@ -771,7 +771,7 @@ gz model --list
 gz model -m chainwing_3body
 
 # 实时查看铰链关节角度
-gz topic -e -t /world/flat_terrain/model/chainwing_3body/joint_state
+gz topic -e -t /world/flat_terrain/model/chainwing_3body_0/joint_state
 ```
 
 **预期输出**（joint_state）：

@@ -742,7 +742,7 @@ updateHingeEstimate(dt)
 | 源文件 | `src/modules/simulation/gz_bridge/GZMixingInterfaceServo.cpp` |
 | 运行频率 | ScheduledWorkItem（由 mixing_output 驱动） |
 | 输入话题 | `actuator_servos`, `chainwing_hinge_status` |
-| 输出 | Gazebo topics: `/model/chainwing_3body/servo_{0,1,2}` |
+| 输出 | Gazebo topics: `/model/chainwing_3body_0/servo_{0,1,2}` (注意 `_0` 实例后缀) |
 
 ### 9.2 舵面输出计算
 
@@ -903,8 +903,8 @@ actuator_motors (motor_0..2)  ← 缩放到 [0, 1000]
     │
     │ [GZMixingInterfaceServo]  + 铰链修正
     ▼
-/model/chainwing_3body/servo_{0,1,2}  ← Gazebo 话题, [-1, +1]
-/model/chainwing_3body/command/motor_speed  ← Gazebo 话题
+/model/chainwing_3body_0/servo_{0,1,2}  ← Gazebo 话题, [-1, +1] (注: SITL 加 _0 实例后缀)
+/model/chainwing_3body_0/command/motor_speed  ← Gazebo 话题
     │
     │ [Gazebo JointPositionController]  P=10.0
     ▼

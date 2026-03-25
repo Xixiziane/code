@@ -932,7 +932,7 @@ Flight Review URL: ____
 │  │    servo_2 += trim_right    ← 右Elevon铰链修正            │ │
 │  │    clamp(-1.0, 1.0)                                      │ │
 │  │                                                          │ │
-│  │  Publish to Gazebo: /model/chainwing_3body/servo_{0,1,2} │ │
+│  │  Publish to Gazebo: /model/chainwing_3body_0/servo_{0,1,2}│ │
 │  └──────────────────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────┘
                               │
@@ -1009,9 +1009,11 @@ Flight Review URL: ____
   
   # 对比: Gazebo 端的实际舵面输入
   # 终端2:
-  gz topic -e /model/chainwing_3body/servo_0  # 左Elevon (应 = 原始 + trim_left)
-  gz topic -e /model/chainwing_3body/servo_1  # 中央Elevator (应 = 原始, 无修正)
-  gz topic -e /model/chainwing_3body/servo_2  # 右Elevon (应 = 原始 + trim_right)
+  # ⚠️ 注意: SITL 以 -i 0 启动, model name = chainwing_3body_0 (有 _0 后缀!)
+  # 先用 gz topic -l | grep servo 确认实际话题名
+  gz topic -e /model/chainwing_3body_0/servo_0  # 左Elevon (应 = 原始 + trim_left)
+  gz topic -e /model/chainwing_3body_0/servo_1  # 中央Elevator (应 = 原始, 无修正)
+  gz topic -e /model/chainwing_3body_0/servo_2  # 右Elevon (应 = 原始 + trim_right)
   
   如果 servo_0 ≠ actuator_servos.control[0] (差值 ≈ trim_left)，
   则通信路径正确 ✅
@@ -1676,8 +1678,9 @@ Gazebo SITL 比 SIH/实机多一个优势: Gazebo 端有独立观察手段
 方法 2: Gazebo topic 监听
   # 终端（PX4外另开）
   gz topic -l                                      # 列出所有 topic
-  gz topic -e /model/chainwing_3body/servo_0       # 左Elevon 实际输出
-  gz topic -e /model/chainwing_3body/joint_state    # 铰链关节状态
+  # ⚠️ SITL model name = chainwing_3body_0 (带实例后缀 _0)
+  gz topic -e /model/chainwing_3body_0/servo_0       # 左Elevon 实际输出
+  gz topic -e /model/chainwing_3body_0/joint_state    # 铰链关节状态
   
 方法 3: PX4 pxh> 实时监听
   # 每2秒打印一次铰链状态
