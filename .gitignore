@@ -113,3 +113,6 @@ log/
 # MATLAB/Simulink build artifacts
 *.slxc
 slprj/
+
+# Parameter sweep output logs
+sweep_logs/

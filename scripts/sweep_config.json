@@ -1,0 +1,142 @@
+{
+    "description": "ChainWing 3-body SITL parameter sweep configuration",
+    "version": "1.0",
+
+    "sitl": {
+        "model": "chainwing_3body",
+        "world": "default",
+        "headless": true,
+        "boot_wait_sec": 20,
+        "flight_duration_sec": 90,
+        "land_wait_sec": 25
+    },
+
+    "runs": [
+        {
+            "name": "baseline_no_yaw",
+            "description": "Baseline — PX4 default yaw, no hinge correction",
+            "params": {
+                "FW_YR_P":  0.05,
+                "FW_YR_I":  0.1,
+                "FW_YR_D":  0.0,
+                "FW_YR_FF": 0.3,
+                "FW_YAW_STAB_SC": 0.0,
+                "CW_SLV_EN": 0
+            }
+        },
+        {
+            "name": "yaw_P_015",
+            "description": "Light yaw P enhancement",
+            "params": {
+                "FW_YR_P":  0.15,
+                "FW_YR_I":  0.1,
+                "FW_YR_D":  0.0,
+                "FW_YR_FF": 0.3,
+                "FW_YAW_STAB_SC": 0.0,
+                "CW_SLV_EN": 0
+            }
+        },
+        {
+            "name": "yaw_P_030",
+            "description": "Medium yaw P enhancement",
+            "params": {
+                "FW_YR_P":  0.3,
+                "FW_YR_I":  0.1,
+                "FW_YR_D":  0.0,
+                "FW_YR_FF": 0.3,
+                "FW_YAW_STAB_SC": 0.0,
+                "CW_SLV_EN": 0
+            }
+        },
+        {
+            "name": "yaw_P_060_full",
+            "description": "Full airframe values — strong yaw P + heading hold",
+            "params": {
+                "FW_YR_P":  0.6,
+                "FW_YR_I":  0.5,
+                "FW_YR_D":  0.0,
+                "FW_YR_FF": 0.5,
+                "FW_YAW_STAB_SC": 1.0,
+                "CW_SLV_EN": 0
+            }
+        },
+        {
+            "name": "yaw_PD_D005",
+            "description": "Full yaw P + light D damping",
+            "params": {
+                "FW_YR_P":  0.6,
+                "FW_YR_I":  0.5,
+                "FW_YR_D":  0.005,
+                "FW_YR_FF": 0.5,
+                "FW_YAW_STAB_SC": 1.0,
+                "CW_SLV_EN": 0
+            }
+        },
+        {
+            "name": "yaw_PD_D010",
+            "description": "Full yaw P + medium D damping",
+            "params": {
+                "FW_YR_P":  0.6,
+                "FW_YR_I":  0.5,
+                "FW_YR_D":  0.01,
+                "FW_YR_FF": 0.5,
+                "FW_YAW_STAB_SC": 1.0,
+                "CW_SLV_EN": 0
+            }
+        },
+        {
+            "name": "yaw_PD_D020",
+            "description": "Full yaw P + strong D damping",
+            "params": {
+                "FW_YR_P":  0.6,
+                "FW_YR_I":  0.5,
+                "FW_YR_D":  0.02,
+                "FW_YR_FF": 0.5,
+                "FW_YAW_STAB_SC": 1.0,
+                "CW_SLV_EN": 0
+            }
+        },
+        {
+            "name": "hinge_corr_default",
+            "description": "Best yaw + hinge correction enabled (KP=1.5, KD=0.2)",
+            "params": {
+                "FW_YR_P":  0.6,
+                "FW_YR_I":  0.5,
+                "FW_YR_D":  0.0,
+                "FW_YR_FF": 0.5,
+                "FW_YAW_STAB_SC": 1.0,
+                "CW_SLV_EN": 1,
+                "CW_SLV_KP": 1.5,
+                "CW_SLV_KD": 0.2
+            }
+        },
+        {
+            "name": "hinge_corr_KP20",
+            "description": "Hinge correction with stronger KP",
+            "params": {
+                "FW_YR_P":  0.6,
+                "FW_YR_I":  0.5,
+                "FW_YR_D":  0.0,
+                "FW_YR_FF": 0.5,
+                "FW_YAW_STAB_SC": 1.0,
+                "CW_SLV_EN": 1,
+                "CW_SLV_KP": 2.0,
+                "CW_SLV_KD": 0.3
+            }
+        },
+        {
+            "name": "hinge_corr_KP10",
+            "description": "Hinge correction with lighter KP",
+            "params": {
+                "FW_YR_P":  0.6,
+                "FW_YR_I":  0.5,
+                "FW_YR_D":  0.0,
+                "FW_YR_FF": 0.5,
+                "FW_YAW_STAB_SC": 1.0,
+                "CW_SLV_EN": 1,
+                "CW_SLV_KP": 1.0,
+                "CW_SLV_KD": 0.15
+            }
+        }
+    ]
+}
