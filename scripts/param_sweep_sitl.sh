@@ -13,7 +13,7 @@
 #   # 首次使用需先编译:
 #   DONT_RUN=1 make px4_sitl_default
 #   # 运行扫描:
-#   bash scripts/param_sweep_sitl.sh [sweep_config.json] [--run 3]
+#   bash scripts/param_sweep_sitl.sh [sweep_config.json] [--run 3] [--phase B_yaw_P]
 #
 # 依赖: jq (JSON parser), PX4 SITL 已编译
 # ============================================================================
@@ -39,11 +39,13 @@ LOG_OUTPUT_DIR="${PX4_DIR}/sweep_logs"
 # ── 参数解析 ────────────────────────────────────────────────────────────────
 CONFIG_FILE="${1:-${SCRIPT_DIR}/sweep_config.json}"
 SINGLE_RUN=""
+PHASE_FILTER=""
 
 shift || true
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --run) SINGLE_RUN="$2"; shift 2 ;;
+        --phase) PHASE_FILTER="$2"; shift 2 ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
 done
@@ -149,10 +151,11 @@ run_single() {
     local run_index="$1"
     local run_name=$(jq -r ".runs[$run_index].name" "$CONFIG_FILE")
     local run_desc=$(jq -r ".runs[$run_index].description" "$CONFIG_FILE")
+    local run_phase=$(jq -r ".runs[$run_index].phase // \"\"" "$CONFIG_FILE")
     local param_keys=$(jq -r ".runs[$run_index].params | keys[]" "$CONFIG_FILE")
 
     log_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    log_info "轮次 $((run_index + 1))/${NUM_RUNS}: ${run_name}"
+    log_info "轮次 $((run_index + 1))/${NUM_RUNS}: ${run_name}  [阶段: ${run_phase}]"
     log_info "说明: ${run_desc}"
     log_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
@@ -290,6 +293,25 @@ if [ -n "$SINGLE_RUN" ]; then
         exit 1
     fi
     run_single "$run_idx"
+elif [ -n "$PHASE_FILTER" ]; then
+    # 按阶段过滤运行
+    log_info "过滤阶段: $PHASE_FILTER"
+    phase_count=0
+    for ((i = 0; i < NUM_RUNS; i++)); do
+        run_phase=$(jq -r ".runs[$i].phase // \"\"" "$CONFIG_FILE")
+        if [[ "$run_phase" == "$PHASE_FILTER" ]]; then
+            phase_count=$((phase_count + 1))
+            run_single "$i" || {
+                log_warn "轮次 $((i + 1)) 失败，继续下一轮..."
+                sleep 5
+            }
+        fi
+    done
+    if [ $phase_count -eq 0 ]; then
+        log_err "未找到匹配阶段: $PHASE_FILTER"
+        log_info "可用阶段: $(jq -r '[.runs[].phase // ""] | unique | .[]' "$CONFIG_FILE" | tr '\n' ' ')"
+        exit 1
+    fi
 else
     # 全部运行
     for ((i = 0; i < NUM_RUNS; i++)); do

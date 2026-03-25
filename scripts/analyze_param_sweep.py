@@ -50,6 +50,7 @@ class FlightMetrics:
     """单次飞行的性能指标"""
     name: str = ""
     description: str = ""
+    phase: str = ""
     params: Dict[str, float] = field(default_factory=dict)
     # 跟踪误差 (RMS, deg)
     roll_rms_error: float = 0.0
@@ -59,6 +60,9 @@ class FlightMetrics:
     roll_max_error: float = 0.0
     pitch_max_error: float = 0.0
     yaw_rate_max_error: float = 0.0
+    # 角速率跟踪 (RMS, deg/s)
+    roll_rate_rms_error: float = 0.0
+    pitch_rate_rms_error: float = 0.0
     # 振荡计数 (零交叉数 / 时间)
     roll_oscillation_freq: float = 0.0
     yaw_rate_oscillation_freq: float = 0.0
@@ -280,6 +284,44 @@ def compute_metrics(fd: FlightData) -> FlightMetrics:
             dt = np.mean(np.diff(fd.t_rate[mask])) if np.sum(mask) > 1 else 0.01
             m.yaw_rate_oscillation_freq = compute_zero_crossings(error, dt)
 
+    # ── Roll rate 跟踪误差 ──
+    if len(fd.roll_rate) > 0 and len(fd.roll_rate_sp) > 0:
+        mask = fd.t_rate > SKIP_SEC
+        if np.any(mask):
+            rr_active = fd.roll_rate[mask]
+            t_active = fd.t_rate[mask]
+            if len(fd.t_rate_sp) > 0:
+                sp_mask = fd.t_rate_sp > SKIP_SEC
+                if np.any(sp_mask):
+                    sp_active = np.interp(t_active,
+                                          fd.t_rate_sp[sp_mask],
+                                          fd.roll_rate_sp[sp_mask])
+                else:
+                    sp_active = np.zeros_like(rr_active)
+            else:
+                sp_active = np.zeros_like(rr_active)
+            error = rr_active - sp_active
+            m.roll_rate_rms_error = float(np.sqrt(np.mean(error ** 2)))
+
+    # ── Pitch rate 跟踪误差 ──
+    if len(fd.pitch_rate) > 0 and len(fd.pitch_rate_sp) > 0:
+        mask = fd.t_rate > SKIP_SEC
+        if np.any(mask):
+            pr_active = fd.pitch_rate[mask]
+            t_active = fd.t_rate[mask]
+            if len(fd.t_rate_sp) > 0:
+                sp_mask = fd.t_rate_sp > SKIP_SEC
+                if np.any(sp_mask):
+                    sp_active = np.interp(t_active,
+                                          fd.t_rate_sp[sp_mask],
+                                          fd.pitch_rate_sp[sp_mask])
+                else:
+                    sp_active = np.zeros_like(pr_active)
+            else:
+                sp_active = np.zeros_like(pr_active)
+            error = pr_active - sp_active
+            m.pitch_rate_rms_error = float(np.sqrt(np.mean(error ** 2)))
+
     # ── 铰链指标 ──
     if len(fd.hinge_angle) > 0:
         mask = fd.t_hinge > SKIP_SEC
@@ -309,7 +351,10 @@ plt.rcParams['font.sans-serif'] = _preferred_fonts
 plt.rcParams['axes.unicode_minus'] = False
 
 COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
-          '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
+          '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
+          '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5',
+          '#c49c94', '#f7b6d2', '#c7c7c7', '#dbdb8d', '#9edae5',
+          '#393b79', '#637939']
 
 
 def plot_attitude_comparison(flights: List[FlightData], output_dir: str):
@@ -372,6 +417,72 @@ def plot_yaw_rate_comparison(flights: List[FlightData], output_dir: str):
 
     plt.tight_layout()
     path = os.path.join(output_dir, '02_yaw_rate_tracking.png')
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    print(f"  Saved: {path}")
+    return fig
+
+
+def plot_roll_rate_comparison(flights: List[FlightData], output_dir: str):
+    """图2b: 滚转角速率跟踪对比"""
+    n = len(flights)
+    cols = min(n, 3)
+    rows = (n + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(5 * cols, 3.5 * rows), squeeze=False)
+    fig.suptitle('Roll Rate Tracking per Run', fontsize=14, fontweight='bold')
+
+    for i, fd in enumerate(flights):
+        ax = axes[i // cols][i % cols]
+        if len(fd.t_rate) > 0:
+            ax.plot(fd.t_rate, fd.roll_rate, 'b-', alpha=0.5, linewidth=0.6,
+                    label='Actual')
+        if len(fd.t_rate_sp) > 0:
+            ax.plot(fd.t_rate_sp, fd.roll_rate_sp, 'r--', alpha=0.7,
+                    linewidth=0.8, label='Setpoint')
+        ax.set_title(fd.name, fontsize=9)
+        ax.set_ylabel('deg/s')
+        ax.grid(True, alpha=0.3)
+        if i == 0:
+            ax.legend(fontsize=7)
+
+    for i in range(n, rows * cols):
+        axes[i // cols][i % cols].set_visible(False)
+
+    plt.tight_layout()
+    path = os.path.join(output_dir, '02b_roll_rate_tracking.png')
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    print(f"  Saved: {path}")
+    return fig
+
+
+def plot_pitch_rate_comparison(flights: List[FlightData], output_dir: str):
+    """图2c: 俯仰角速率跟踪对比"""
+    n = len(flights)
+    cols = min(n, 3)
+    rows = (n + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(5 * cols, 3.5 * rows), squeeze=False)
+    fig.suptitle('Pitch Rate Tracking per Run', fontsize=14, fontweight='bold')
+
+    for i, fd in enumerate(flights):
+        ax = axes[i // cols][i % cols]
+        if len(fd.t_rate) > 0:
+            ax.plot(fd.t_rate, fd.pitch_rate, 'b-', alpha=0.5, linewidth=0.6,
+                    label='Actual')
+        if len(fd.t_rate_sp) > 0:
+            ax.plot(fd.t_rate_sp, fd.pitch_rate_sp, 'r--', alpha=0.7,
+                    linewidth=0.8, label='Setpoint')
+        ax.set_title(fd.name, fontsize=9)
+        ax.set_ylabel('deg/s')
+        ax.grid(True, alpha=0.3)
+        if i == 0:
+            ax.legend(fontsize=7)
+
+    for i in range(n, rows * cols):
+        axes[i // cols][i % cols].set_visible(False)
+
+    plt.tight_layout()
+    path = os.path.join(output_dir, '02c_pitch_rate_tracking.png')
     fig.savefig(path, dpi=150)
     plt.close(fig)
     print(f"  Saved: {path}")
@@ -450,7 +561,7 @@ def plot_metrics_bar(flights: List[FlightData], output_dir: str):
     x = np.arange(len(names))
     width = 0.65
 
-    fig, axes = plt.subplots(2, 3, figsize=(16, 8))
+    fig, axes = plt.subplots(3, 3, figsize=(18, 12))
     fig.suptitle('Performance Metrics Comparison', fontsize=14, fontweight='bold')
 
     # Roll RMS Error
@@ -458,42 +569,63 @@ def plot_metrics_bar(flights: List[FlightData], output_dir: str):
     axes[0, 0].bar(x, vals, width, color=COLORS[:len(x)])
     axes[0, 0].set_title('Roll RMS Error (deg)')
     axes[0, 0].set_xticks(x)
-    axes[0, 0].set_xticklabels(names, rotation=45, ha='right', fontsize=7)
+    axes[0, 0].set_xticklabels(names, rotation=45, ha='right', fontsize=6)
+
+    # Roll Rate RMS Error
+    vals = [fd.metrics.roll_rate_rms_error for fd in flights]
+    axes[0, 1].bar(x, vals, width, color=COLORS[:len(x)])
+    axes[0, 1].set_title('Roll Rate RMS Error (deg/s)')
+    axes[0, 1].set_xticks(x)
+    axes[0, 1].set_xticklabels(names, rotation=45, ha='right', fontsize=6)
+
+    # Pitch Rate RMS Error
+    vals = [fd.metrics.pitch_rate_rms_error for fd in flights]
+    axes[0, 2].bar(x, vals, width, color=COLORS[:len(x)])
+    axes[0, 2].set_title('Pitch Rate RMS Error (deg/s)')
+    axes[0, 2].set_xticks(x)
+    axes[0, 2].set_xticklabels(names, rotation=45, ha='right', fontsize=6)
 
     # Yaw Rate RMS Error
     vals = [fd.metrics.yaw_rate_rms_error for fd in flights]
-    axes[0, 1].bar(x, vals, width, color=COLORS[:len(x)])
-    axes[0, 1].set_title('Yaw Rate RMS Error (deg/s)')
-    axes[0, 1].set_xticks(x)
-    axes[0, 1].set_xticklabels(names, rotation=45, ha='right', fontsize=7)
+    axes[1, 0].bar(x, vals, width, color=COLORS[:len(x)])
+    axes[1, 0].set_title('Yaw Rate RMS Error (deg/s)')
+    axes[1, 0].set_xticks(x)
+    axes[1, 0].set_xticklabels(names, rotation=45, ha='right', fontsize=6)
 
     # Yaw Rate Max Error
     vals = [fd.metrics.yaw_rate_max_error for fd in flights]
-    axes[0, 2].bar(x, vals, width, color=COLORS[:len(x)])
-    axes[0, 2].set_title('Yaw Rate Max Error (deg/s)')
-    axes[0, 2].set_xticks(x)
-    axes[0, 2].set_xticklabels(names, rotation=45, ha='right', fontsize=7)
+    axes[1, 1].bar(x, vals, width, color=COLORS[:len(x)])
+    axes[1, 1].set_title('Yaw Rate Max Error (deg/s)')
+    axes[1, 1].set_xticks(x)
+    axes[1, 1].set_xticklabels(names, rotation=45, ha='right', fontsize=6)
 
     # Yaw Rate Oscillation Freq
     vals = [fd.metrics.yaw_rate_oscillation_freq for fd in flights]
-    axes[1, 0].bar(x, vals, width, color=COLORS[:len(x)])
-    axes[1, 0].set_title('Yaw Rate Oscillation (Hz)')
-    axes[1, 0].set_xticks(x)
-    axes[1, 0].set_xticklabels(names, rotation=45, ha='right', fontsize=7)
+    axes[1, 2].bar(x, vals, width, color=COLORS[:len(x)])
+    axes[1, 2].set_title('Yaw Rate Oscillation (Hz)')
+    axes[1, 2].set_xticks(x)
+    axes[1, 2].set_xticklabels(names, rotation=45, ha='right', fontsize=6)
 
     # Servo Activity
     vals = [fd.metrics.servo_activity for fd in flights]
-    axes[1, 1].bar(x, vals, width, color=COLORS[:len(x)])
-    axes[1, 1].set_title('Servo Activity (Σ|Δ|/s)')
-    axes[1, 1].set_xticks(x)
-    axes[1, 1].set_xticklabels(names, rotation=45, ha='right', fontsize=7)
+    axes[2, 0].bar(x, vals, width, color=COLORS[:len(x)])
+    axes[2, 0].set_title('Servo Activity (sum|delta|/s)')
+    axes[2, 0].set_xticks(x)
+    axes[2, 0].set_xticklabels(names, rotation=45, ha='right', fontsize=6)
 
     # Hinge Angle RMS
     vals = [fd.metrics.hinge_angle_rms for fd in flights]
-    axes[1, 2].bar(x, vals, width, color=COLORS[:len(x)])
-    axes[1, 2].set_title('Hinge Angle RMS (deg)')
-    axes[1, 2].set_xticks(x)
-    axes[1, 2].set_xticklabels(names, rotation=45, ha='right', fontsize=7)
+    axes[2, 1].bar(x, vals, width, color=COLORS[:len(x)])
+    axes[2, 1].set_title('Hinge Angle RMS (deg)')
+    axes[2, 1].set_xticks(x)
+    axes[2, 1].set_xticklabels(names, rotation=45, ha='right', fontsize=6)
+
+    # Pitch RMS Error
+    vals = [fd.metrics.pitch_rms_error for fd in flights]
+    axes[2, 2].bar(x, vals, width, color=COLORS[:len(x)])
+    axes[2, 2].set_title('Pitch RMS Error (deg)')
+    axes[2, 2].set_xticks(x)
+    axes[2, 2].set_xticklabels(names, rotation=45, ha='right', fontsize=6)
 
     plt.tight_layout()
     path = os.path.join(output_dir, '05_metrics_comparison.png')
@@ -509,9 +641,9 @@ def plot_metrics_table(flights: List[FlightData], output_dir: str):
     ax.axis('off')
 
     headers = ['Run Name', 'Roll RMS\n(deg)', 'Pitch RMS\n(deg)',
-               'Yaw Rate\nRMS (°/s)', 'Yaw Rate\nMax (°/s)',
-               'Yaw Osc\n(Hz)', 'Servo\nActivity',
-               'Hinge RMS\n(deg)']
+               'Roll Rate\nRMS (d/s)', 'Pitch Rate\nRMS (d/s)',
+               'Yaw Rate\nRMS (d/s)', 'Yaw Rate\nMax (d/s)',
+               'Servo\nActivity', 'Hinge RMS\n(deg)']
 
     cell_data = []
     for fd in flights:
@@ -520,9 +652,10 @@ def plot_metrics_table(flights: List[FlightData], output_dir: str):
             m.name,
             f'{m.roll_rms_error:.2f}',
             f'{m.pitch_rms_error:.2f}',
+            f'{m.roll_rate_rms_error:.2f}',
+            f'{m.pitch_rate_rms_error:.2f}',
             f'{m.yaw_rate_rms_error:.2f}',
             f'{m.yaw_rate_max_error:.1f}',
-            f'{m.yaw_rate_oscillation_freq:.2f}',
             f'{m.servo_activity:.2f}',
             f'{m.hinge_angle_rms:.2f}' if m.hinge_angle_rms > 0 else '-'
         ])
@@ -561,6 +694,8 @@ def generate_pdf_report(flights: List[FlightData], output_dir: str):
         figs = []
         figs.append(plot_attitude_comparison(flights, output_dir))
         figs.append(plot_yaw_rate_comparison(flights, output_dir))
+        figs.append(plot_roll_rate_comparison(flights, output_dir))
+        figs.append(plot_pitch_rate_comparison(flights, output_dir))
         figs.append(plot_servo_comparison(flights, output_dir))
         fig_hinge = plot_hinge_comparison(flights, output_dir)
         if fig_hinge:
@@ -634,6 +769,12 @@ def main():
         print(f"Processing: {name}")
         fd = extract_flight_data(ulg_path, name)
         if fd is not None:
+            # Load phase info if available
+            if os.path.exists(json_path):
+                with open(json_path) as f:
+                    info = json.load(f)
+                    fd.metrics.phase = info.get('phase', '')
+                    fd.metrics.params = info.get('params', {})
             compute_metrics(fd)
             flights.append(fd)
             m = fd.metrics
@@ -658,6 +799,8 @@ def main():
     print(f"\nGenerating plots ({len(flights)} runs)...")
     plot_attitude_comparison(flights, output_dir)
     plot_yaw_rate_comparison(flights, output_dir)
+    plot_roll_rate_comparison(flights, output_dir)
+    plot_pitch_rate_comparison(flights, output_dir)
     plot_servo_comparison(flights, output_dir)
     plot_hinge_comparison(flights, output_dir)
     plot_metrics_bar(flights, output_dir)
@@ -669,14 +812,18 @@ def main():
     # 输出 CSV 汇总
     csv_path = os.path.join(output_dir, 'metrics_summary.csv')
     with open(csv_path, 'w') as f:
-        headers = ['name', 'roll_rms_deg', 'pitch_rms_deg',
+        headers = ['name', 'phase',
+                   'roll_rms_deg', 'pitch_rms_deg',
+                   'roll_rate_rms_deg_s', 'pitch_rate_rms_deg_s',
                    'yaw_rate_rms_deg_s', 'yaw_rate_max_deg_s',
                    'yaw_osc_hz', 'servo_activity',
                    'hinge_rms_deg', 'duration_s']
         f.write(','.join(headers) + '\n')
         for fd in flights:
             m = fd.metrics
-            f.write(f'{m.name},{m.roll_rms_error:.3f},{m.pitch_rms_error:.3f},'
+            f.write(f'{m.name},{m.phase},'
+                    f'{m.roll_rms_error:.3f},{m.pitch_rms_error:.3f},'
+                    f'{m.roll_rate_rms_error:.3f},{m.pitch_rate_rms_error:.3f},'
                     f'{m.yaw_rate_rms_error:.3f},{m.yaw_rate_max_error:.1f},'
                     f'{m.yaw_rate_oscillation_freq:.3f},{m.servo_activity:.3f},'
                     f'{m.hinge_angle_rms:.3f},{m.flight_duration_sec:.0f}\n')
@@ -684,7 +831,7 @@ def main():
 
     print(f"\n===== Analysis Complete =====")
     print(f"  {len(flights)} runs analyzed")
-    print(f"  6 PNG charts + 1 CSV saved to: {output_dir}/")
+    print(f"  8 PNG charts + 1 CSV saved to: {output_dir}/")
     if args.pdf:
         print(f"  1 PDF report saved")
 

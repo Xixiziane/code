@@ -1,6 +1,7 @@
 {
-    "description": "ChainWing 3-body SITL parameter sweep configuration",
-    "version": "1.0",
+    "description": "ChainWing 3-body SITL comprehensive parameter sweep — 22 runs, 9 phases",
+    "version": "2.0",
+    "note": "Follows CHAINWING_VERIFICATION_PLAN.md order: baseline → yaw P → I → FF → D → heading hold → roll P → pitch P → hinge",
 
     "sitl": {
         "model": "chainwing_3body",
@@ -13,129 +14,347 @@
 
     "runs": [
         {
-            "name": "baseline_no_yaw",
-            "description": "Baseline — PX4 default yaw, no hinge correction",
+            "name": "01_baseline",
+            "phase": "A_baseline",
+            "description": "PX4 defaults — no yaw enhancement, no hinge correction",
             "params": {
                 "FW_YR_P":  0.05,
                 "FW_YR_I":  0.1,
                 "FW_YR_D":  0.0,
                 "FW_YR_FF": 0.3,
                 "FW_YAW_STAB_SC": 0.0,
+                "FW_RR_P":  0.05,
+                "FW_PR_P":  0.08,
                 "CW_SLV_EN": 0
             }
         },
+
         {
-            "name": "yaw_P_015",
-            "description": "Light yaw P enhancement",
+            "name": "02_yrp_015",
+            "phase": "B_yaw_P",
+            "description": "Yaw rate P sweep: light (3x default)",
             "params": {
                 "FW_YR_P":  0.15,
                 "FW_YR_I":  0.1,
                 "FW_YR_D":  0.0,
                 "FW_YR_FF": 0.3,
                 "FW_YAW_STAB_SC": 0.0,
+                "FW_RR_P":  0.05,
+                "FW_PR_P":  0.08,
                 "CW_SLV_EN": 0
             }
         },
         {
-            "name": "yaw_P_030",
-            "description": "Medium yaw P enhancement",
+            "name": "03_yrp_030",
+            "phase": "B_yaw_P",
+            "description": "Yaw rate P sweep: medium (6x default)",
             "params": {
                 "FW_YR_P":  0.3,
                 "FW_YR_I":  0.1,
                 "FW_YR_D":  0.0,
                 "FW_YR_FF": 0.3,
                 "FW_YAW_STAB_SC": 0.0,
+                "FW_RR_P":  0.05,
+                "FW_PR_P":  0.08,
                 "CW_SLV_EN": 0
             }
         },
         {
-            "name": "yaw_P_060_full",
-            "description": "Full airframe values — strong yaw P + heading hold",
+            "name": "04_yrp_060",
+            "phase": "B_yaw_P",
+            "description": "Yaw rate P sweep: strong (12x default, airframe value)",
+            "params": {
+                "FW_YR_P":  0.6,
+                "FW_YR_I":  0.1,
+                "FW_YR_D":  0.0,
+                "FW_YR_FF": 0.3,
+                "FW_YAW_STAB_SC": 0.0,
+                "FW_RR_P":  0.05,
+                "FW_PR_P":  0.08,
+                "CW_SLV_EN": 0
+            }
+        },
+
+        {
+            "name": "05_yri_020",
+            "phase": "C_yaw_I",
+            "description": "Yaw rate I sweep: double default (P=0.6 locked)",
+            "params": {
+                "FW_YR_P":  0.6,
+                "FW_YR_I":  0.2,
+                "FW_YR_D":  0.0,
+                "FW_YR_FF": 0.3,
+                "FW_YAW_STAB_SC": 0.0,
+                "FW_RR_P":  0.05,
+                "FW_PR_P":  0.08,
+                "CW_SLV_EN": 0
+            }
+        },
+        {
+            "name": "06_yri_050",
+            "phase": "C_yaw_I",
+            "description": "Yaw rate I sweep: airframe value (P=0.6 locked)",
+            "params": {
+                "FW_YR_P":  0.6,
+                "FW_YR_I":  0.5,
+                "FW_YR_D":  0.0,
+                "FW_YR_FF": 0.3,
+                "FW_YAW_STAB_SC": 0.0,
+                "FW_RR_P":  0.05,
+                "FW_PR_P":  0.08,
+                "CW_SLV_EN": 0
+            }
+        },
+
+        {
+            "name": "07_yrff_050",
+            "phase": "D_yaw_FF",
+            "description": "Yaw rate FF sweep: airframe value (P=0.6, I=0.5 locked)",
             "params": {
                 "FW_YR_P":  0.6,
                 "FW_YR_I":  0.5,
                 "FW_YR_D":  0.0,
                 "FW_YR_FF": 0.5,
-                "FW_YAW_STAB_SC": 1.0,
+                "FW_YAW_STAB_SC": 0.0,
+                "FW_RR_P":  0.05,
+                "FW_PR_P":  0.08,
                 "CW_SLV_EN": 0
             }
         },
         {
-            "name": "yaw_PD_D005",
-            "description": "Full yaw P + light D damping",
+            "name": "08_yrff_070",
+            "phase": "D_yaw_FF",
+            "description": "Yaw rate FF sweep: aggressive (P=0.6, I=0.5 locked)",
+            "params": {
+                "FW_YR_P":  0.6,
+                "FW_YR_I":  0.5,
+                "FW_YR_D":  0.0,
+                "FW_YR_FF": 0.7,
+                "FW_YAW_STAB_SC": 0.0,
+                "FW_RR_P":  0.05,
+                "FW_PR_P":  0.08,
+                "CW_SLV_EN": 0
+            }
+        },
+
+        {
+            "name": "09_yrd_005",
+            "phase": "E_yaw_D",
+            "description": "Yaw rate D sweep: light damping (best P/I/FF locked)",
             "params": {
                 "FW_YR_P":  0.6,
                 "FW_YR_I":  0.5,
                 "FW_YR_D":  0.005,
                 "FW_YR_FF": 0.5,
-                "FW_YAW_STAB_SC": 1.0,
+                "FW_YAW_STAB_SC": 0.0,
+                "FW_RR_P":  0.05,
+                "FW_PR_P":  0.08,
                 "CW_SLV_EN": 0
             }
         },
         {
-            "name": "yaw_PD_D010",
-            "description": "Full yaw P + medium D damping",
+            "name": "10_yrd_010",
+            "phase": "E_yaw_D",
+            "description": "Yaw rate D sweep: medium damping",
             "params": {
                 "FW_YR_P":  0.6,
                 "FW_YR_I":  0.5,
                 "FW_YR_D":  0.01,
                 "FW_YR_FF": 0.5,
-                "FW_YAW_STAB_SC": 1.0,
+                "FW_YAW_STAB_SC": 0.0,
+                "FW_RR_P":  0.05,
+                "FW_PR_P":  0.08,
                 "CW_SLV_EN": 0
             }
         },
         {
-            "name": "yaw_PD_D020",
-            "description": "Full yaw P + strong D damping",
+            "name": "11_yrd_020",
+            "phase": "E_yaw_D",
+            "description": "Yaw rate D sweep: strong damping",
             "params": {
                 "FW_YR_P":  0.6,
                 "FW_YR_I":  0.5,
                 "FW_YR_D":  0.02,
                 "FW_YR_FF": 0.5,
-                "FW_YAW_STAB_SC": 1.0,
+                "FW_YAW_STAB_SC": 0.0,
+                "FW_RR_P":  0.05,
+                "FW_PR_P":  0.08,
                 "CW_SLV_EN": 0
             }
         },
+
         {
-            "name": "hinge_corr_default",
-            "description": "Best yaw + hinge correction enabled (KP=1.5, KD=0.2)",
+            "name": "12_stab_10",
+            "phase": "F_heading_hold",
+            "description": "Heading hold: FW_YAW_STAB_SC=1.0 (SITL default)",
             "params": {
                 "FW_YR_P":  0.6,
                 "FW_YR_I":  0.5,
                 "FW_YR_D":  0.0,
                 "FW_YR_FF": 0.5,
                 "FW_YAW_STAB_SC": 1.0,
+                "FW_RR_P":  0.05,
+                "FW_PR_P":  0.08,
+                "CW_SLV_EN": 0
+            }
+        },
+        {
+            "name": "13_stab_20",
+            "phase": "F_heading_hold",
+            "description": "Heading hold: FW_YAW_STAB_SC=2.0 (hardware value)",
+            "params": {
+                "FW_YR_P":  0.6,
+                "FW_YR_I":  0.5,
+                "FW_YR_D":  0.0,
+                "FW_YR_FF": 0.5,
+                "FW_YAW_STAB_SC": 2.0,
+                "FW_RR_P":  0.05,
+                "FW_PR_P":  0.08,
+                "CW_SLV_EN": 0
+            }
+        },
+
+        {
+            "name": "14_rrp_015",
+            "phase": "G_roll_P",
+            "description": "Roll rate P sweep: 3x PX4 default (best yaw params locked)",
+            "params": {
+                "FW_YR_P":  0.6,
+                "FW_YR_I":  0.5,
+                "FW_YR_D":  0.0,
+                "FW_YR_FF": 0.5,
+                "FW_YAW_STAB_SC": 1.0,
+                "FW_RR_P":  0.15,
+                "FW_PR_P":  0.08,
+                "CW_SLV_EN": 0
+            }
+        },
+        {
+            "name": "15_rrp_030",
+            "phase": "G_roll_P",
+            "description": "Roll rate P sweep: airframe value (0.3)",
+            "params": {
+                "FW_YR_P":  0.6,
+                "FW_YR_I":  0.5,
+                "FW_YR_D":  0.0,
+                "FW_YR_FF": 0.5,
+                "FW_YAW_STAB_SC": 1.0,
+                "FW_RR_P":  0.3,
+                "FW_PR_P":  0.08,
+                "CW_SLV_EN": 0
+            }
+        },
+        {
+            "name": "16_rrp_050",
+            "phase": "G_roll_P",
+            "description": "Roll rate P sweep: aggressive (0.5)",
+            "params": {
+                "FW_YR_P":  0.6,
+                "FW_YR_I":  0.5,
+                "FW_YR_D":  0.0,
+                "FW_YR_FF": 0.5,
+                "FW_YAW_STAB_SC": 1.0,
+                "FW_RR_P":  0.5,
+                "FW_PR_P":  0.08,
+                "CW_SLV_EN": 0
+            }
+        },
+
+        {
+            "name": "17_prp_020",
+            "phase": "H_pitch_P",
+            "description": "Pitch rate P sweep: 2.5x default (best yaw+roll locked)",
+            "params": {
+                "FW_YR_P":  0.6,
+                "FW_YR_I":  0.5,
+                "FW_YR_D":  0.0,
+                "FW_YR_FF": 0.5,
+                "FW_YAW_STAB_SC": 1.0,
+                "FW_RR_P":  0.3,
+                "FW_PR_P":  0.2,
+                "CW_SLV_EN": 0
+            }
+        },
+        {
+            "name": "18_prp_050",
+            "phase": "H_pitch_P",
+            "description": "Pitch rate P sweep: 6x default",
+            "params": {
+                "FW_YR_P":  0.6,
+                "FW_YR_I":  0.5,
+                "FW_YR_D":  0.0,
+                "FW_YR_FF": 0.5,
+                "FW_YAW_STAB_SC": 1.0,
+                "FW_RR_P":  0.3,
+                "FW_PR_P":  0.5,
+                "CW_SLV_EN": 0
+            }
+        },
+        {
+            "name": "19_prp_090",
+            "phase": "H_pitch_P",
+            "description": "Pitch rate P sweep: airframe value (0.9)",
+            "params": {
+                "FW_YR_P":  0.6,
+                "FW_YR_I":  0.5,
+                "FW_YR_D":  0.0,
+                "FW_YR_FF": 0.5,
+                "FW_YAW_STAB_SC": 1.0,
+                "FW_RR_P":  0.3,
+                "FW_PR_P":  0.9,
+                "CW_SLV_EN": 0
+            }
+        },
+
+        {
+            "name": "20_hinge_kp10",
+            "phase": "I_hinge",
+            "description": "Hinge correction: light (KP=1.0, KD=0.1)",
+            "params": {
+                "FW_YR_P":  0.6,
+                "FW_YR_I":  0.5,
+                "FW_YR_D":  0.0,
+                "FW_YR_FF": 0.5,
+                "FW_YAW_STAB_SC": 1.0,
+                "FW_RR_P":  0.3,
+                "FW_PR_P":  0.9,
+                "CW_SLV_EN": 1,
+                "CW_SLV_KP": 1.0,
+                "CW_SLV_KD": 0.1
+            }
+        },
+        {
+            "name": "21_hinge_kp15",
+            "phase": "I_hinge",
+            "description": "Hinge correction: default (KP=1.5, KD=0.2)",
+            "params": {
+                "FW_YR_P":  0.6,
+                "FW_YR_I":  0.5,
+                "FW_YR_D":  0.0,
+                "FW_YR_FF": 0.5,
+                "FW_YAW_STAB_SC": 1.0,
+                "FW_RR_P":  0.3,
+                "FW_PR_P":  0.9,
                 "CW_SLV_EN": 1,
                 "CW_SLV_KP": 1.5,
                 "CW_SLV_KD": 0.2
             }
         },
         {
-            "name": "hinge_corr_KP20",
-            "description": "Hinge correction with stronger KP",
+            "name": "22_hinge_kp20",
+            "phase": "I_hinge",
+            "description": "Hinge correction: aggressive (KP=2.0, KD=0.3)",
             "params": {
                 "FW_YR_P":  0.6,
                 "FW_YR_I":  0.5,
                 "FW_YR_D":  0.0,
                 "FW_YR_FF": 0.5,
                 "FW_YAW_STAB_SC": 1.0,
+                "FW_RR_P":  0.3,
+                "FW_PR_P":  0.9,
                 "CW_SLV_EN": 1,
                 "CW_SLV_KP": 2.0,
                 "CW_SLV_KD": 0.3
-            }
-        },
-        {
-            "name": "hinge_corr_KP10",
-            "description": "Hinge correction with lighter KP",
-            "params": {
-                "FW_YR_P":  0.6,
-                "FW_YR_I":  0.5,
-                "FW_YR_D":  0.0,
-                "FW_YR_FF": 0.5,
-                "FW_YAW_STAB_SC": 1.0,
-                "CW_SLV_EN": 1,
-                "CW_SLV_KP": 1.0,
-                "CW_SLV_KD": 0.15
             }
         }
     ]
