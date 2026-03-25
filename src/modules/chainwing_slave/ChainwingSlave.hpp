@@ -129,9 +129,10 @@ private:
 	/**
 	 * Process master commands received via debug_array MAVLink bridge.
 	 * Reads DEBUG_FLOAT_ARRAY (id=43, name="CW_CMD") containing:
-	 *   data[0]: master_pitch_cmd   (normalized [-1, 1])
-	 *   data[1]: master_throttle    (normalized [0, 1])
-	 *   data[2]: master_roll_cmd    (normalized [-1, 1])
+	 *   data[0]: master_pitch_cmd     (normalized [-1, 1])
+	 *   data[1]: master_throttle      (normalized [0, 1])
+	 *   data[2]: master_roll_cmd      (normalized [-1, 1])
+	 *   data[3]: master_roll_attitude (rad) — for relative hinge angle calculation
 	 */
 	void processMasterCommands();
 
@@ -154,11 +155,12 @@ private:
 	float _hinge_rate_right{0.0f};   ///< Right hinge angular rate (rad/s)
 
 	// Master commands received via MAVLink
-	float _master_pitch_cmd{0.0f};   ///< Master pitch command (normalized [-1, 1])
-	float _master_throttle{0.0f};    ///< Master throttle command (normalized [0, 1])
-	float _master_roll_cmd{0.0f};    ///< Master roll command (normalized [-1, 1])
-	hrt_abstime _last_master_cmd{0}; ///< Timestamp of last received master command
-	bool _master_cmd_valid{false};   ///< True if master command received within timeout
+	float _master_pitch_cmd{0.0f};     ///< Master pitch command (normalized [-1, 1])
+	float _master_throttle{0.0f};      ///< Master throttle command (normalized [0, 1])
+	float _master_roll_cmd{0.0f};      ///< Master roll command (normalized [-1, 1])
+	float _master_roll_attitude{0.0f}; ///< Master roll attitude (rad) — for relative hinge angle calculation
+	hrt_abstime _last_master_cmd{0};   ///< Timestamp of last received master command
+	bool _master_cmd_valid{false};     ///< True if master command received within timeout
 
 	// Reference attitude (captured at startup for IMU integration baseline)
 	float _roll_ref{0.0f};       ///< Initial roll angle reference (hinge axis = X = roll)

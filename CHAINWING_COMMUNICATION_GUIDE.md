@@ -254,7 +254,8 @@ mavlink stream -u 24550 -s DEBUG_FLOAT_ARRAY -r 10
 | **data[0]** | float | `master_pitch_cmd` — 俯仰指令 (归一化 [-1, 1]) |
 | **data[1]** | float | `master_throttle` — 油门指令 (归一化 [0, 1]) |
 | **data[2]** | float | `master_roll_cmd` — 横滚指令 (归一化 [-1, 1]) |
-| data[3-57] | float | 保留（未使用，值为 0.0） |
+| **data[3]** | float | `master_roll_attitude` — 主机当前横滚姿态角 (rad)，用于计算相对铰链角 |
+| data[4-57] | float | 保留（未使用，值为 0.0） |
 
 ### 4.3 协议常量定义
 

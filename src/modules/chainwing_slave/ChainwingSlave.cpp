@@ -43,13 +43,14 @@
  *   δ_total = clamp(δ_master + δ_trim, -1.0, 1.0)
  *
  * Communication architecture (hardware):
- *   Master → Slave: UART + MAVLink v2 (overall pitch/throttle/roll commands)
+ *   Master → Slave: UART + MAVLink v2 (pitch/throttle/roll commands + roll attitude)
  *   Slave → Master: UART + MAVLink v2 (hinge status feedback)
+ *   Hinge angle = slave_roll - master_roll (true relative measurement)
  *
  * In simulation (GZ SITL):
  *   Single PX4 instance controls all 3 units.
- *   Hinge angles estimated from IMU angular velocity integration
- *   (complementary filter with attitude feedback).
+ *   Hinge angle approximated from center body roll deviation from startup reference.
+ *   (No inter-controller communication needed; CW_SLV_COMM_EN=0)
  */
 
 #include "ChainwingSlave.hpp"
@@ -212,7 +213,24 @@ void ChainwingSlave::updateHingeEstimate(float dt)
 	if (attitude_valid) {
 		const matrix::Quatf q(attitude.q);
 		const matrix::Eulerf euler(q);
-		const float roll_error = euler.phi() - _roll_ref;
+
+		// Hardware mode (CW_SLV_COMM_EN=1 with valid master data):
+		// Use RELATIVE roll angle = slave_roll - master_roll.
+		// This is the TRUE hinge angle measurement.
+		//
+		// SITL mode (CW_SLV_COMM_EN=0 or no master data):
+		// Approximate using roll deviation from startup reference.
+		// This works because the single PX4 instance's center body
+		// roll is influenced by hinge dynamics in Gazebo physics.
+		float roll_error;
+
+		if (_param_comm_enable.get() != 0 && _master_cmd_valid) {
+			// Hardware: relative hinge angle from two IMUs
+			roll_error = euler.phi() - _master_roll_attitude;
+		} else {
+			// SITL approximation: deviation from startup reference
+			roll_error = euler.phi() - _roll_ref;
+		}
 
 		// Blend IMU-integrated angle with attitude-based estimate
 		// This corrects long-term drift while keeping high-frequency response
@@ -272,6 +290,7 @@ void ChainwingSlave::processMasterCommands()
 			_master_pitch_cmd = math::constrain(cmd.data[0], -1.0f, 1.0f);
 			_master_throttle = math::constrain(cmd.data[1], 0.0f, 1.0f);
 			_master_roll_cmd = math::constrain(cmd.data[2], -1.0f, 1.0f);
+			_master_roll_attitude = math::constrain(cmd.data[3], -M_PI_F, M_PI_F); // Master's current roll attitude (rad)
 			_last_master_cmd = hrt_absolute_time();
 			_master_cmd_valid = true;
 		}
@@ -329,8 +348,13 @@ int ChainwingSlave::print_status()
 
 	if (_param_comm_enable.get() != 0) {
 		PX4_INFO("  Master cmd valid: %s", _master_cmd_valid ? "YES" : "NO");
-		PX4_INFO("  Master pitch=%.2f, throttle=%.2f, roll=%.2f",
-			 (double)_master_pitch_cmd, (double)_master_throttle, (double)_master_roll_cmd);
+		PX4_INFO("  Master pitch=%.2f, throttle=%.2f, roll_cmd=%.2f, roll_att=%.2f deg",
+			 (double)_master_pitch_cmd, (double)_master_throttle,
+			 (double)_master_roll_cmd, (double)math::degrees(_master_roll_attitude));
+		PX4_INFO("  Hinge mode: RELATIVE (slave_roll - master_roll)");
+	} else {
+		PX4_INFO("  Hinge mode: APPROXIMATE (roll deviation from startup ref=%.2f deg)",
+			 (double)math::degrees(_roll_ref));
 	}
 
 	return 0;
@@ -367,12 +391,22 @@ Master → Slave (id=43, name="CW_CMD"):
   data[0]: pitch command (normalized [-1, 1])
   data[1]: throttle (normalized [0, 1])
   data[2]: roll command (normalized [-1, 1])
+  data[3]: roll attitude (rad) — master's current roll for relative hinge angle
 
 Requires: mavlink start -d /dev/ttyS2 -b 921600 -m custom
 
 ### Control Law
   δ_trim = Kp × θ_hinge + Kd × θ̇_hinge
   δ_total = clamp(δ_master + δ_trim, -1.0, 1.0)
+
+### Hinge Angle Estimation (two modes)
+In hardware mode (CW_SLV_COMM_EN=1 + valid master data):
+  hinge_angle = slave_roll - master_roll  (true relative measurement)
+  Master sends its roll attitude via CW_CMD data[3].
+
+In simulation mode (CW_SLV_COMM_EN=0 or no master data):
+  hinge_angle ≈ roll_deviation_from_startup_reference
+  Approximation: center body roll correlates with hinge deflection.
 
 ### Implementation
 The module runs at 50 Hz and publishes ChainwingHingeStatus containing
