@@ -110,10 +110,26 @@ param set-default CW_SLV_PWM_EN 1
 param set-default CW_SLV_COMM_EN 0
 
 # ================================================================
-# UART MAVLink for 3-Pixhawk distributed setup (uncomment if needed)
+# Chain-wing master communication module (3-Pixhawk distributed)
 # ================================================================
+# Disabled by default (single-Pixhawk mode). Enable CW_MST_EN=1
+# on the MASTER Pixhawk only for 3-Pixhawk distributed architecture.
+param set-default CW_MST_EN 0
+
+# ================================================================
+# UART MAVLink for 3-Pixhawk distributed setup
+# ================================================================
+# Uncomment these lines on the MASTER Pixhawk to enable UART links
+# to left and right slave wing units:
+#
+# TELEM2 → Left slave:
 # mavlink start -d /dev/ttyS2 -b 921600 -r 4000 -m custom
 # mavlink stream -d /dev/ttyS2 -s DEBUG_FLOAT_ARRAY -r 10
+#
+# SERIAL5 → Right slave:
+# mavlink start -d /dev/ttyS6 -b 921600 -r 4000 -m custom
+# mavlink stream -d /dev/ttyS6 -s DEBUG_FLOAT_ARRAY -r 10
 
-# Auto-start chainwing_slave module
+# Auto-start chainwing modules
 chainwing_slave start
+chainwing_master start

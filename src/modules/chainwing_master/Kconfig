@@ -1,0 +1,5 @@
+menuconfig MODULES_CHAINWING_MASTER
+	bool "chainwing_master"
+	default n
+	---help---
+		Enable support for chain-wing master communication module
