@@ -1,9 +1,10 @@
 # 链翼无人机主从机通信系统技术文档
 
-> **版本**: v2.0  
-> **日期**: 2026-03-22  
+> **版本**: v3.0  
+> **日期**: 2026-03-26  
 > **项目**: PX4_test — 链翼（Chain-Wing）三体固定翼无人机  
-> **范围**: 完整项目概述 + 主从机 UART+MAVLink 通信方式 + 验证步骤
+> **范围**: 完整项目概述 + 主从机 UART+MAVLink 通信方式 + 验证步骤  
+> **v3.0 新增**: chainwing_master 模块、双模铰链角估计、CW_CMD data[3]=roll_attitude、自动化参数扫描脚本
 
 ---
 
@@ -22,6 +23,7 @@
 - [§11 文件清单](#11-文件清单)
 - [§12 故障排除](#12-故障排除)
 - [§13 修改历史记录](#13-修改历史记录)
+- [§14 自动化参数扫描脚本](#14-自动化参数扫描脚本) **[v3.0 新增]**
 
 ---
 
@@ -139,13 +141,41 @@
 在真实硬件上，三架飞机各自运行独立的 PX4 固件：
 
 ```
-┌─────────────┐  UART/MAVLink  ┌─────────────┐  UART/MAVLink  ┌─────────────┐
-│  左侧从机    │◄─────────────►│   中心主机    │◄─────────────►│  右侧从机    │
-│ MAV_SYS_ID=2│  /dev/ttyS2   │ MAV_SYS_ID=1│  /dev/ttyS3   │ MAV_SYS_ID=3│
-│ CW_SLV_EN=1 │  921600 bps   │ CW_SLV_EN=0 │  921600 bps   │ CW_SLV_EN=1 │
-│CW_SLV_COMM=1│               │              │               │CW_SLV_COMM=1│
-└─────────────┘               └─────────────┘               └─────────────┘
+┌─────────────────┐  UART/MAVLink  ┌──────────────────┐  UART/MAVLink  ┌─────────────────┐
+│   左侧从机       │◄─────────────►│    中心主机        │◄─────────────►│   右侧从机       │
+│ MAV_SYS_ID=2    │  TELEM2       │ MAV_SYS_ID=1     │  SERIAL5      │ MAV_SYS_ID=3    │
+│ CW_SLV_EN=1     │  /dev/ttyS2   │ CW_SLV_EN=0      │  /dev/ttyS6   │ CW_SLV_EN=1     │
+│ CW_SLV_COMM_EN=1│  921600 bps   │ CW_MST_EN=1      │  921600 bps   │ CW_SLV_COMM_EN=1│
+│ CW_SLV_PWM_EN=1 │               │ chainwing_master  │               │ CW_SLV_PWM_EN=1 │
+└─────────────────┘               └──────────────────┘               └─────────────────┘
 ```
+
+### 2.4 主机模块（chainwing_master）
+
+`chainwing_master` 模块运行在 **中心主机** 上（仅限硬件三机模式），负责：
+
+1. **发布 CW_CMD**（10 Hz）：将主机的姿态指令和 **当前 roll 姿态角** 发送给从机
+2. **接收 CW_HINGE**：接收从机铰链状态反馈，用于遥测/日志
+
+```
+CW_CMD (id=43) 内容：
+  data[0] = 主机 pitch 力矩指令 (vehicle_torque_setpoint.xyz[1])
+  data[1] = 主机 throttle 指令 (vehicle_thrust_setpoint.xyz[0])
+  data[2] = 主机 roll 力矩指令 (vehicle_torque_setpoint.xyz[0])
+  data[3] = 主机当前 roll 姿态角 (euler.phi(), rad) ← 从机用此计算铰链角
+```
+
+**注意**：在单机 SITL 模式下 **不需要** 启用 `CW_MST_EN`。SITL 中只有一个 PX4 实例，
+`chainwing_slave` 使用启动基准近似算法估计铰链角。
+
+### 2.5 双模铰链角估计
+
+从机根据通信状态自动选择铰链角计算方式：
+
+| 模式 | 条件 | 公式 | 精度 |
+|------|------|------|------|
+| **硬件模式** | `CW_SLV_COMM_EN=1` + 收到有效 CW_CMD | `hinge_angle = slave_roll - master_roll_attitude` | 真实相对测量 |
+| **SITL 模式** | `CW_SLV_COMM_EN=0` 或无主机数据 | `hinge_angle ≈ roll - _roll_ref (启动基准)` | 近似，单实例可用 |
 
 ---
 
@@ -274,8 +304,9 @@ static constexpr hrt_abstime MASTER_CMD_TIMEOUT_US = 500000;  // 500ms 超时
        │         CW_CMD (id=43)            │
        │──────────────────────────────────►│ processMasterCommands()
        │   pitch=0.5, throttle=0.7,        │ → _master_pitch_cmd = 0.5
-       │   roll=0.0                        │ → _master_throttle = 0.7
+       │   roll=0.0, roll_att=0.02         │ → _master_throttle = 0.7
        │                                   │ → _master_roll_cmd = 0.0
+       │                                   │ → _master_roll_attitude = 0.02
        │                                   │
        │         CW_HINGE (id=42)          │
        │◄──────────────────────────────────│ publishDebugArray()
@@ -298,6 +329,7 @@ static constexpr hrt_abstime MASTER_CMD_TIMEOUT_US = 500000;  // 500ms 超时
        │                                   │
        │   如果 500ms 没收到 CW_CMD:       │
        │                                   │ → _master_cmd_valid = false
+       │                                   │ → 自动切换到 SITL 近似模式
        │                                   │ → PX4_WARN("Master command timeout")
 ```
 
@@ -536,10 +568,14 @@ bool GZMixingInterfaceServo::updateOutputs(...)
 | `CW_SLV_TRIM_MAX` | FLOAT | 0.3 | [0, 1] | 最大修正量（归一化行程） |
 | `CW_SLV_LP_FREQ` | FLOAT | 10.0 | [0, 50] | 角速率低通滤波频率 (Hz) |
 | `CW_SLV_COMM_EN` | INT32 | 0 | 0/1 | MAVLink 通信使能开关 |
+| `CW_SLV_PWM_EN` | INT32 | 0 | 0/1 | 硬件 PWM trim 叠加使能（仅硬件模式） |
+| `CW_MST_EN` | INT32 | 0 | 0/1 | 主机通信模块使能（仅主机 Pixhawk） |
 
 ### 6.2 参数分组
 
-在 QGC 地面站中，所有参数位于 **Chain-Wing Slave** 分组下。
+在 QGC 地面站中：
+- **从机参数**: `CW_SLV_*` — Chain-Wing Slave 分组
+- **主机参数**: `CW_MST_*` — Chain-Wing Master 分组
 
 ### 6.3 关键参数含义
 
@@ -548,8 +584,16 @@ bool GZMixingInterfaceServo::updateOutputs(...)
 - `1`：正常工作，估计铰链角度并计算修正量
 
 **CW_SLV_COMM_EN (通信使能)**
-- `0`：仅使用 uORB 本地通信（适用于单机仿真）
-- `1`：启用 `publishDebugArray()` 和 `processMasterCommands()`，通过 MAVLink 进行双向通信（适用于硬件验证和多实例仿真）
+- `0`：仅使用 uORB 本地通信（适用于单机 SITL 仿真）
+- `1`：启用 `publishDebugArray()` 和 `processMasterCommands()`，通过 MAVLink 进行双向通信（适用于硬件三机验证）。此模式下铰链角使用**真实相对 roll** 计算。
+
+**CW_SLV_PWM_EN (硬件 PWM 叠加)**
+- `0`：修正量仅通过 GZMixingInterfaceServo 叠加（SITL 模式）
+- `1`：从机直接读取 actuator_servos，叠加 trim 后重新发布（硬件模式）
+
+**CW_MST_EN (主机模块使能)**
+- `0`：不发送 CW_CMD（单机模式/SITL）
+- `1`：主机以 10 Hz 发布 CW_CMD，包含当前 roll 姿态角。**仅在三机分布式模式的主机上启用。**
 
 **CW_SLV_KP (比例增益)**
 - 5° 偏差时：trim = 0.3 × (5×π/180) = 0.026 (2.6% 行程)
@@ -967,19 +1011,30 @@ ls *.csv | grep chainwing
 
 | 文件路径 | 说明 | 行数 |
 |----------|------|------|
-| `src/modules/chainwing_slave/ChainwingSlave.hpp` | 模块头文件：类定义、协议常量、成员变量 | 179 |
-| `src/modules/chainwing_slave/ChainwingSlave.cpp` | 模块实现：主循环、PD控制、通信接口 | 377 |
-| `src/modules/chainwing_slave/chainwing_slave_params.c` | 6个参数定义 | 139 |
+| `src/modules/chainwing_slave/ChainwingSlave.hpp` | 从机模块头文件：类定义、协议常量、成员变量 | 179 |
+| `src/modules/chainwing_slave/ChainwingSlave.cpp` | 从机模块实现：主循环、PD控制、通信接口 | 436 |
+| `src/modules/chainwing_slave/chainwing_slave_params.c` | 7 个 CW_SLV_* 参数定义 | 174 |
 | `src/modules/chainwing_slave/CMakeLists.txt` | CMake 编译配置 | 42 |
 | `src/modules/chainwing_slave/Kconfig` | 编译菜单项 | 6 |
+| `src/modules/chainwing_master/ChainwingMaster.hpp` | 主机模块头文件：类定义 | 128 |
+| `src/modules/chainwing_master/ChainwingMaster.cpp` | 主机模块实现：10Hz CW_CMD 发布 + CW_HINGE 接收 | 270 |
+| `src/modules/chainwing_master/chainwing_master_params.c` | CW_MST_EN 参数定义 | 59 |
+| `src/modules/chainwing_master/CMakeLists.txt` | CMake 编译配置 | 42 |
+| `src/modules/chainwing_master/Kconfig` | 编译菜单项 | 6 |
 | `msg/ChainwingHingeStatus.msg` | uORB 消息定义（铰链状态） | 16 |
 | `ROMFS/.../4008_gz_chainwing_3body` | SITL 机架文件 | 232 |
+| `ROMFS/.../2150_chainwing` | 硬件机架文件（含 master + slave 配置） | 136 |
+| `scripts/param_sweep_sitl.sh` | 自动化参数扫描 Bash 脚本 | 250 |
+| `scripts/analyze_param_sweep.py` | 日志分析 + 对比图生成 Python 脚本 | 600 |
+| `scripts/sweep_config.json` | 22 轮参数扫描配置 | 362 |
+| `scripts/README.md` | 脚本使用说明 | 232 |
 
 ### 11.2 修改文件
 
 | 文件路径 | 修改内容 |
 |----------|----------|
-| `boards/px4/sitl/default.px4board` | 添加 `CONFIG_MODULES_CHAINWING_SLAVE=y` |
+| `boards/px4/sitl/default.px4board` | 添加 `CONFIG_MODULES_CHAINWING_SLAVE=y` + `CONFIG_MODULES_CHAINWING_MASTER=y` |
+| `boards/px4/fmu-v3/default.px4board` | 添加 `CONFIG_MODULES_CHAINWING_SLAVE=y` + `CONFIG_MODULES_CHAINWING_MASTER=y` |
 | `msg/CMakeLists.txt` | 注册 `ChainwingHingeStatus.msg` |
 | `src/modules/logger/logged_topics.cpp` | 添加 `chainwing_hinge_status` 可选话题 |
 | `src/modules/simulation/gz_bridge/GZMixingInterfaceServo.cpp` | 读取 hinge_status 并叠加 trim |
@@ -1003,7 +1058,7 @@ ls *.csv | grep chainwing
 | `listener chainwing_hinge_status` 2秒超时 | 模块未运行或 CW_SLV_EN=0 | `chainwing_slave start` + `param set CW_SLV_EN 1` |
 | `listener debug_array` 无 id=42 消息 | CW_SLV_COMM_EN=0 | `param set CW_SLV_COMM_EN 1` |
 | MAVLink `rate rx: 0 B/s` | 串口接线错误或波特率不匹配 | 检查 TX-RX 交叉接线，确认双方 `-b 921600` |
-| `Master command timeout` | 主机未发送 CW_CMD | 正常（主机端发送代码尚未集成） |
+| `Master command timeout` | 主机未发送 CW_CMD | 正常（主机未启动或 CW_MST_EN=0） | 在主机上 `param set CW_MST_EN 1` 并重启 |
 | listener 打印太快（几秒打完） | SITL 锁步模式：sim time ≠ wall clock | 使用 `gz topic` 或 logger+PlotJuggler 替代 |
 | 编译报 `Invalid unit` | 参数 @unit 不在允许列表 | 增益参数不加 @unit（无量纲） |
 
@@ -1103,3 +1158,120 @@ mavlink stream -d /dev/ttyS2 -s DEBUG_FLOAT_ARRAY -r 10
 | 配置修复 | 4008_gz_chainwing_3body | chainwing_slave start 自启动 |
 | 配置修复 | logged_topics.cpp | chainwing_hinge_status 日志记录 |
 | MAVLink修复 | 文档+注释 | -m onboard → -m custom |
+
+### 13.6 v3.0 更新汇总
+
+| 变更类型 | 文件 | 描述 |
+|----------|------|------|
+| **功能新增** | `src/modules/chainwing_master/` | 新增 chainwing_master 模块（10Hz CW_CMD 发布） |
+| **协议升级** | ChainwingSlave.cpp | CW_CMD data[3] = master_roll_attitude (rad) |
+| **双模铰链** | ChainwingSlave.cpp | 硬件模式: slave_roll - master_roll; SITL: roll - _roll_ref |
+| **参数新增** | chainwing_master_params.c | CW_MST_EN 主机使能开关 |
+| **参数新增** | chainwing_slave_params.c | CW_SLV_PWM_EN 硬件 PWM 叠加 |
+| **配置更新** | fmu-v3/default.px4board | 添加 CONFIG_MODULES_CHAINWING_MASTER=y |
+| **机架更新** | 2150_chainwing | 添加 CW_MST_EN + master UART 配置 + 双模块自启动 |
+| **自动化脚本** | scripts/ | 22 轮参数扫描 + 日志分析 + 对比图生成 |
+
+---
+
+## §14 自动化参数扫描脚本
+
+### 14.1 概述
+
+项目提供了自动化参数扫描工具，可以自动遍历多组参数组合，运行 GZ SITL 仿真，保存日志，并生成对比分析图。
+
+**位于**: `scripts/` 目录
+
+| 文件 | 功能 |
+|------|------|
+| `param_sweep_sitl.sh` | Bash 编排脚本：启动/参数设置/飞行/保存日志 |
+| `analyze_param_sweep.py` | Python 分析脚本：读取 .ulg 日志 → 生成 8 种图表 + CSV |
+| `sweep_config.json` | 扫描配置文件：22 轮 × 9 阶段 × 10 个参数 |
+| `README.md` | 脚本详细使用说明 |
+
+### 14.2 安装依赖
+
+```bash
+# 系统工具
+sudo apt install jq
+
+# Python 分析依赖
+pip3 install pyulog matplotlib numpy
+
+# PX4 编译（如未编译）
+cd PX4_test
+DONT_RUN=1 make px4_sitl_default gz_chainwing_3body
+```
+
+### 14.3 运行参数扫描
+
+```bash
+# 运行全部 22 轮（约 66 分钟）
+bash scripts/param_sweep_sitl.sh
+
+# 只运行特定轮次
+bash scripts/param_sweep_sitl.sh --run 5
+
+# 只运行某阶段（例如 Yaw P 扫描）
+bash scripts/param_sweep_sitl.sh --phase B_yaw_P
+
+# 使用自定义配置文件
+bash scripts/param_sweep_sitl.sh my_config.json
+```
+
+### 14.4 分析日志
+
+```bash
+# 生成 PNG 图表
+python3 scripts/analyze_param_sweep.py sweep_logs/
+
+# 指定输出目录
+python3 scripts/analyze_param_sweep.py sweep_logs/ --output results/
+
+# 生成 PDF 报告
+python3 scripts/analyze_param_sweep.py sweep_logs/ --pdf
+```
+
+### 14.5 扫描阶段设计（22 轮 × 9 阶段）
+
+| 阶段 | 名称 | 轮次 | 扫描参数 | 扫描值 |
+|------|------|------|----------|--------|
+| A | baseline | 1 | — | PX4 默认值，CW_SLV_EN=0 |
+| B | yaw_P | 2-4 | FW_YR_P | 0.15 → 0.3 → 0.6 |
+| C | yaw_I | 5-6 | FW_YR_I | 0.2 → 0.5 |
+| D | yaw_FF | 7-8 | FW_YR_FF | 0.5 → 0.7 |
+| E | yaw_D | 9-11 | FW_YR_D | 0.005 → 0.01 → 0.02 |
+| F | heading_hold | 12-13 | FW_YAW_STAB_SC | 1.0 → 2.0 |
+| G | roll_P | 14-16 | FW_RR_P | 0.15 → 0.3 → 0.5 |
+| H | pitch_P | 17-19 | FW_PR_P | 0.2 → 0.5 → 0.9 |
+| I | hinge | 20-22 | CW_SLV_KP/KD | 1.0/0.1 → 1.5/0.2 → 2.0/0.3 |
+
+**设计原则**：每阶段只改一个参数，先调好的参数锁定后继续下一阶段。
+
+### 14.6 输出文件
+
+| 文件 | 内容 |
+|------|------|
+| `01_attitude_comparison.png` | 多轮 Roll/Pitch/Yaw 对比时间序列 |
+| `02a_yaw_rate_tracking.png` | 各轮偏航角速率跟踪对比 |
+| `02b_roll_rate_tracking.png` | 各轮滚转角速率跟踪对比 |
+| `02c_pitch_rate_tracking.png` | 各轮俯仰角速率跟踪对比 |
+| `03_servo_output.png` | 舵面输出对比 |
+| `04_hinge_correction.png` | 铰链修正效果对比 |
+| `05_metrics_comparison.png` | 9 项性能指标柱状图 |
+| `06_metrics_table.png` | 性能汇总表格图 |
+| `metrics_summary.csv` | CSV 格式汇总数据 |
+
+### 14.7 性能指标说明
+
+| 指标 | 说明 | 越小越好 |
+|------|------|:--------:|
+| Yaw Rate RMS (°/s) | 偏航角速率跟踪误差均方根 | ✅ |
+| Roll Rate RMS (°/s) | 滚转角速率跟踪误差均方根 | ✅ |
+| Pitch Rate RMS (°/s) | 俯仰角速率跟踪误差均方根 | ✅ |
+| Roll RMS (°) | 滚转角偏差均方根 | ✅ |
+| Pitch RMS (°) | 俯仰角偏差均方根 | ✅ |
+| Yaw Deviation RMS (°) | 偏航角偏差均方根 | ✅ |
+| Servo Activity | 舵面变化率（越低越平滑） | ✅ |
+| Hinge Angle RMS (°) | 铰链角偏差均方根 | ✅ |
+| Max Hinge Angle (°) | 最大铰链角 | ✅ |

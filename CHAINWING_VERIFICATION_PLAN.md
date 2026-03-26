@@ -1,11 +1,12 @@
 # ChainWing 验证测试计划
 
-> **版本**: v2.0  
-> **日期**: 2026-03-25  
+> **版本**: v3.0  
+> **日期**: 2026-03-26  
 > **目标**: 系统性验证通信、基础飞控、偏航增强、从机铰链修正  
 > **平台**: Gazebo SITL (主要) / Pixhawk 2.4.8 (FMU-V3) SIH (辅助)  
 > **工具**: QGC 参数修改 + 自主飞行任务 + Flight Review 回看分析  
-> **v2.0 新增**: §12-§15 Gazebo SITL 专项验证指南（通信 + 控制律 + 操作流程 + 数据分析）
+> **v2.0 新增**: §12-§15 Gazebo SITL 专项验证指南（通信 + 控制律 + 操作流程 + 数据分析）  
+> **v3.0 新增**: §17 自动化参数扫描验证 + chainwing_master 模块 + 双模铰链角
 
 ---
 
@@ -26,6 +27,8 @@
 - [§13 GZ SITL 控制律验证详解](#13-gz-sitl-控制律验证详解) ← **v2.0 新增**
 - [§14 GZ SITL 完整操作流程](#14-gz-sitl-完整操作流程) ← **v2.0 新增**
 - [§15 GZ SITL 飞行数据深度分析](#15-gz-sitl-飞行数据深度分析) ← **v2.0 新增**
+- [§17 自动化参数扫描验证](#17-自动化参数扫描验证) ← **v3.0 新增**
+- [§16 版本历史](#16-版本历史)
 
 ---
 
@@ -1743,9 +1746,154 @@ Flight Review URL   ___      ___     ___     ___     ___
 
 ---
 
+## §17 自动化参数扫描验证 **[v3.0 新增]**
+
+### 17.1 概述
+
+手动逐轮参数调试效率低、易遗漏。本项目提供了 **自动化参数扫描工具**，可一键运行 22 轮仿真、自动设参、自动飞行、自动保存日志，并生成对比分析图。
+
+**工具位置**: `scripts/` 目录
+
+| 文件 | 功能 |
+|------|------|
+| `param_sweep_sitl.sh` | Bash 编排脚本 — 遍历参数组合 → 启动 SITL → 设参 → 飞行 → 保存日志 |
+| `analyze_param_sweep.py` | Python 分析脚本 — 读取 .ulg → 提取数据 → 计算指标 → 生成图表 |
+| `sweep_config.json` | 22 轮扫描配置 — 定义每轮参数值和阶段分组 |
+| `README.md` | 脚本使用详细说明 |
+
+### 17.2 前置条件
+
+```bash
+# 1. 安装系统依赖
+sudo apt install jq
+
+# 2. 安装 Python 分析依赖
+pip3 install pyulog matplotlib numpy
+
+# 3. 编译 PX4 SITL（首次）
+cd PX4_test
+DONT_RUN=1 make px4_sitl_default gz_chainwing_3body
+```
+
+### 17.3 运行扫描
+
+#### 17.3.1 全量扫描（22 轮，约 66 分钟）
+
+```bash
+bash scripts/param_sweep_sitl.sh
+```
+
+脚本自动执行：
+1. 读取 `sweep_config.json` 中的参数配置
+2. 对每轮：启动 Gazebo SITL → 等待 PX4 启动 → 设置参数 → 起飞 → 盘旋 90 秒 → 着陆 → 保存日志
+3. 日志保存到 `sweep_logs/` 目录，文件名包含轮次和参数描述
+
+#### 17.3.2 单轮/单阶段运行
+
+```bash
+# 只运行第 5 轮
+bash scripts/param_sweep_sitl.sh --run 5
+
+# 只运行 Yaw P 阶段（第 2-4 轮）
+bash scripts/param_sweep_sitl.sh --phase B_yaw_P
+
+# 只运行铰链修正阶段（第 20-22 轮）
+bash scripts/param_sweep_sitl.sh --phase I_hinge
+```
+
+### 17.4 扫描配置（22 轮 × 9 阶段）
+
+| 阶段 | 名称 | 轮次 | 扫描参数 | 扫描值 | 验证目标 |
+|------|------|------|----------|--------|----------|
+| A | baseline | 1 | — | PX4 默认值 | 基线对照 |
+| B | yaw_P | 2-4 | `FW_YR_P` | 0.15 → 0.3 → 0.6 | 偏航阻尼 |
+| C | yaw_I | 5-6 | `FW_YR_I` | 0.2 → 0.5 | 偏航稳态误差 |
+| D | yaw_FF | 7-8 | `FW_YR_FF` | 0.5 → 0.7 | 偏航前馈响应 |
+| E | yaw_D | 9-11 | `FW_YR_D` | 0.005 → 0.01 → 0.02 | 偏航微分阻尼 |
+| F | heading_hold | 12-13 | `FW_YAW_STAB_SC` | 1.0 → 2.0 | 航向保持增益 |
+| G | roll_P | 14-16 | `FW_RR_P` | 0.15 → 0.3 → 0.5 | 滚转阻尼 |
+| H | pitch_P | 17-19 | `FW_PR_P` | 0.2 → 0.5 → 0.9 | 俯仰响应 |
+| I | hinge | 20-22 | `CW_SLV_KP`/`KD` | 1.0/0.1 → 1.5/0.2 → 2.0/0.3 | 铰链修正效果 |
+
+**设计原则**: 每阶段仅变化一个参数（或一组相关参数），前序阶段的最优值锁定后递推。
+
+### 17.5 分析日志
+
+#### 17.5.1 生成图表
+
+```bash
+# 生成 PNG 对比图
+python3 scripts/analyze_param_sweep.py sweep_logs/
+
+# 指定输出目录
+python3 scripts/analyze_param_sweep.py sweep_logs/ --output analysis_results/
+
+# 同时生成 PDF 报告
+python3 scripts/analyze_param_sweep.py sweep_logs/ --pdf
+```
+
+#### 17.5.2 输出文件
+
+| 文件 | 内容 |
+|------|------|
+| `01_attitude_comparison.png` | 多轮 Roll/Pitch/Yaw 姿态角时间序列 |
+| `02a_yaw_rate_tracking.png` | 各轮偏航角速率跟踪精度 |
+| `02b_roll_rate_tracking.png` | 各轮滚转角速率跟踪精度 |
+| `02c_pitch_rate_tracking.png` | 各轮俯仰角速率跟踪精度 |
+| `03_servo_output.png` | 舵面输出对比 |
+| `04_hinge_correction.png` | 铰链修正效果对比（角度 + 修正量） |
+| `05_metrics_comparison.png` | 9 项性能指标柱状图对比（3×3 布局） |
+| `06_metrics_table.png` | 全轮次性能汇总表格 |
+| `metrics_summary.csv` | CSV 格式汇总（可导入 Excel） |
+
+### 17.6 性能判定标准
+
+| 指标 | 优秀 | 合格 | 不合格 |
+|------|------|------|--------|
+| Yaw Rate RMS | < 5 °/s | < 10 °/s | > 15 °/s |
+| Roll Rate RMS | < 3 °/s | < 8 °/s | > 12 °/s |
+| Pitch Rate RMS | < 3 °/s | < 8 °/s | > 12 °/s |
+| Roll 偏差 RMS | < 2° | < 5° | > 8° |
+| Pitch 偏差 RMS | < 1° | < 3° | > 5° |
+| Yaw 偏差 RMS | < 3° | < 8° | > 15° |
+| Hinge Angle RMS | < 2° | < 5° | > 10° |
+| Max Hinge Angle | < 5° | < 10° | > 15° |
+
+### 17.7 典型工作流
+
+```
+1. 全量扫描 → 找到每阶段最优参数
+   bash scripts/param_sweep_sitl.sh
+
+2. 分析对比 → 确认改善幅度
+   python3 scripts/analyze_param_sweep.py sweep_logs/
+
+3. 针对性精调 → 在最优附近细化
+   编辑 sweep_config.json，收窄范围
+   bash scripts/param_sweep_sitl.sh --phase B_yaw_P
+
+4. 最终确认 → 锁定参数写入机架文件
+   将最优值更新到 4008_gz_chainwing_3body / 2150_chainwing
+```
+
+### 17.8 与手动验证的关系
+
+| 方面 | 自动化扫描 (§17) | 手动验证 (§3-§6) |
+|------|-------------------|-------------------|
+| 适用阶段 | 参数粗调/快速对比 | 最终确认/边界验证 |
+| 精度 | 中（固定飞行模式） | 高（自定义机动） |
+| 效率 | 22 轮 ≈ 66 分钟 | 22 轮 ≈ 数天 |
+| 输出 | PNG 图表 + CSV | Flight Review 链接 |
+| 覆盖度 | 全参数扫描 | 关注特定场景 |
+
+**推荐**: 先用自动化扫描找到大致最优区间 → 再用手动验证精调边界条件。
+
+---
+
 ## §16 版本历史
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
 | v1.0 | 2026-03-24 | 初始版本: 四轮递进测试计划（SIH+Gazebo） |
 | v2.0 | 2026-03-25 | 新增 §12-§15: GZ SITL 专项验证指南（通信架构图、控制律详解、操作流程、深度分析） |
+| v3.0 | 2026-03-26 | 新增 §17: 自动化参数扫描验证（22轮×9阶段脚本 + 分析工具 + 判定标准）；同步 chainwing_master 模块和双模铰链角更新 |

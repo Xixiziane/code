@@ -1,9 +1,10 @@
 # Chain-Wing 三体无人机 完整控制流程文档
 
-> **版本**: v1.0  
-> **日期**: 2026-03-23  
+> **版本**: v1.1  
+> **日期**: 2026-03-26  
 > **适用**: PX4 v1.14 + Gazebo Harmonic + chainwing_3body 模型  
-> **读者**: 需要理解整个项目控制链路的工程师 / 评审人员
+> **读者**: 需要理解整个项目控制链路的工程师 / 评审人员  
+> **v1.1 更新**: 添加 chainwing_master 层 + 双模铰链角估计 + 自动化参数扫描脚本
 
 ---
 
@@ -664,7 +665,12 @@ updateHingeEstimate(dt)
     │     _hinge_angle_right = decay × (prev + rate × dt)
     │
     └─ 6. 互补滤波修正（姿态反馈）
-          roll_error = euler.phi() - _roll_ref
+          ┌─ 硬件模式（CW_SLV_COMM_EN=1 + 有效主机数据）:
+          │   roll_error = euler.phi() - _master_roll_attitude  ← 真实相对 roll
+          │
+          └─ SITL 模式（CW_SLV_COMM_EN=0 或无主机数据）:
+              roll_error = euler.phi() - _roll_ref              ← 启动基准近似
+
           cf_alpha = 0.02    ← 2% 权重给姿态，98% 给积分
           _hinge_angle_left  = 0.98 × integrated + 0.02 × roll_error
           _hinge_angle_right = 0.98 × integrated + 0.02 × (-roll_error)
@@ -675,6 +681,7 @@ updateHingeEstimate(dt)
 - **指数衰减** (τ=2s)：即使积分有误差，2 秒后误差衰减到 37%
 - **互补滤波** (cf=0.02)：用绝对姿态缓慢修正长期漂移
 - **左右取反**：左从机绕 X 轴正向旋转 = 铰链正偏角；右从机正好相反
+- **双模铰链角**：硬件模式使用主机发来的 roll 姿态角（data[3]）计算真实相对铰链角；SITL 模式因为只有单实例，使用启动时的 roll 基准近似
 
 ### 8.5 PD 修正控制律 (computeTrim)
 
@@ -704,7 +711,9 @@ updateHingeEstimate(dt)
 | `CW_SLV_KD` | 0.2 | [0, 2] | PD 微分增益 |
 | `CW_SLV_TRIM_MAX` | 0.3 | [0, 1] | 最大修正量（归一化，30%行程） |
 | `CW_SLV_LP_FREQ` | 10 Hz | [0, 50] | 角速率低通滤波截止频率 |
-| `CW_SLV_COMM_EN` | 0 | 0/1 | MAVLink 通信使能 |
+| `CW_SLV_COMM_EN` | 0 | 0/1 | MAVLink 通信使能（硬件三机模式=1） |
+| `CW_SLV_PWM_EN` | 0 | 0/1 | 硬件 PWM trim 叠加使能 |
+| `CW_MST_EN` | 0 | 0/1 | 主机模块使能（仅主机 Pixhawk 设为 1） |
 
 ### 8.7 MAVLink 通信协议
 
@@ -724,11 +733,14 @@ updateHingeEstimate(dt)
 
 | 字段 | 含义 | 范围 |
 |------|------|------|
-| data[0] | pitch 指令 | [-1, +1] |
+| data[0] | pitch 力矩指令 | [-1, +1] |
 | data[1] | throttle 指令 | [0, +1] |
-| data[2] | roll 指令 | [-1, +1] |
+| data[2] | roll 力矩指令 | [-1, +1] |
+| data[3] | master roll 姿态角 | rad |
 
-**超时保护**：500 ms 未收到主机指令 → `_master_cmd_valid = false`
+**发布源**: `chainwing_master` 模块 (10 Hz, 需 `CW_MST_EN=1`)
+
+**超时保护**：500 ms 未收到主机指令 → `_master_cmd_valid = false` → 自动切换 SITL 近似模式
 
 ---
 
@@ -1237,18 +1249,46 @@ T = 500 ms  积分衰减 + 互补滤波
 |------|------|------|
 | `src/modules/chainwing_slave/ChainwingSlave.cpp` | 新增 | 从机控制器主逻辑 |
 | `src/modules/chainwing_slave/ChainwingSlave.hpp` | 新增 | 类定义 + 成员变量 |
-| `src/modules/chainwing_slave/chainwing_slave_params.c` | 新增 | 6个CW_SLV_*参数定义 |
+| `src/modules/chainwing_slave/chainwing_slave_params.c` | 新增 | 7个CW_SLV_*参数定义 |
 | `src/modules/chainwing_slave/CMakeLists.txt` | 新增 | 构建配置 |
 | `src/modules/chainwing_slave/Kconfig` | 新增 | Kconfig 菜单项 |
+| `src/modules/chainwing_master/ChainwingMaster.cpp` | 新增 | 主机模块：发布 CW_CMD，接收 CW_HINGE |
+| `src/modules/chainwing_master/ChainwingMaster.hpp` | 新增 | 主机类定义 |
+| `src/modules/chainwing_master/chainwing_master_params.c` | 新增 | CW_MST_EN 参数定义 |
+| `src/modules/chainwing_master/CMakeLists.txt` | 新增 | 构建配置 |
+| `src/modules/chainwing_master/Kconfig` | 新增 | Kconfig 菜单项 |
 | `msg/ChainwingHingeStatus.msg` | 新增 | uORB 消息定义 |
 | `src/modules/simulation/gz_bridge/GZMixingInterfaceServo.cpp` | 修改 | 叠加铰链修正逻辑 |
 | `src/modules/simulation/gz_bridge/GZMixingInterfaceServo.hpp` | 修改 | 添加 hinge_status 订阅 |
 | `src/modules/logger/logged_topics.cpp` | 修改 | 添加 chainwing_hinge_status 日志 |
 | `Tools/simulation/gz/models/chainwing_3body/model.sdf` | 新增 | 三体模型 SDF |
-| `ROMFS/.../4008_gz_chainwing_3body` | 新增 | 机架配置文件 |
-| `boards/px4/sitl/default.px4board` | 修改 | 编译使能 |
+| `ROMFS/.../4008_gz_chainwing_3body` | 新增 | SITL 机架配置文件 |
+| `ROMFS/.../2150_chainwing` | 新增 | 硬件机架配置文件 |
+| `boards/px4/sitl/default.px4board` | 修改 | 编译使能 slave + master |
+| `boards/px4/fmu-v3/default.px4board` | 修改 | 编译使能 slave + master |
 
-### 16.2 PX4 原生模块（未修改，参与控制链路）
+### 16.2 自动化脚本
+
+| 文件 | 说明 |
+|------|------|
+| `scripts/param_sweep_sitl.sh` | 自动化参数扫描编排脚本（22 轮 × 9 阶段） |
+| `scripts/analyze_param_sweep.py` | 日志分析 + 8 种对比图生成 + CSV 汇总 |
+| `scripts/sweep_config.json` | 扫描参数配置文件 |
+| `scripts/README.md` | 脚本使用说明 |
+
+**使用方式**：
+```bash
+# 编译
+DONT_RUN=1 make px4_sitl_default gz_chainwing_3body
+
+# 运行全部 22 轮扫描
+bash scripts/param_sweep_sitl.sh
+
+# 生成分析图表
+python3 scripts/analyze_param_sweep.py sweep_logs/
+```
+
+### 16.3 PX4 原生模块（未修改，参与控制链路）
 
 | 模块 | 源路径 | 功能 |
 |------|--------|------|
