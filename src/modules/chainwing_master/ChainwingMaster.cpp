@@ -66,7 +66,7 @@ ChainwingMaster::ChainwingMaster() :
 bool ChainwingMaster::init()
 {
 	ScheduleOnInterval(100000_us); // 10 Hz — matches MAVLink stream rate
-	PX4_INFO("chainwing_master started (10Hz), CW_MST_EN=%d", _param_enable.get());
+	PX4_INFO("chainwing_master started (10Hz), CW_MST_EN=%ld", (long)_param_enable.get());
 	return true;
 }
 
