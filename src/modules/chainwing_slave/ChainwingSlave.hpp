@@ -123,8 +123,10 @@ private:
 	 *   data[4]: trim_left          (normalized)
 	 *   data[5]: trim_right         (normalized)
 	 *   data[6]: data_valid         (1.0 or 0.0)
+	 * @param trim_left  Pre-computed left trim value to include in the message
+	 * @param trim_right Pre-computed right trim value to include in the message
 	 */
-	void publishDebugArray();
+	void publishDebugArray(float trim_left, float trim_right);
 
 	/**
 	 * Process master commands received via debug_array MAVLink bridge.
@@ -168,6 +170,11 @@ private:
 
 	// Previous timestamp for dt calculation
 	hrt_abstime _last_run{0};
+
+	// Guard for PWM overlay: track the last timestamp_sample from ControlAllocator
+	// to avoid re-processing our own re-published actuator_servos output.
+	// Initialized to UINT64_MAX so the first valid message (any timestamp_sample) is always processed.
+	uint64_t _last_ca_timestamp_sample{UINT64_MAX};
 
 	// Parameters
 	DEFINE_PARAMETERS(

@@ -127,22 +127,34 @@ void ChainwingSlave::Run()
 	// Read actuator_servos from control_allocator, add trim to elevon channels,
 	// and re-publish so that PWMOut receives the trimmed values.
 	// This replaces GZMixingInterfaceServo for real hardware.
+	//
+	// RACE CONDITION GUARD: We track the ControlAllocator's timestamp_sample
+	// to avoid re-processing our own re-published output. Without this guard,
+	// the trim correction would accumulate on each cycle until saturation.
 	if (_param_pwm_enable.get() != 0 && _ref_initialized) {
 		actuator_servos_s servos{};
 
 		if (_actuator_servos_sub.copy(&servos) && hrt_elapsed_time(&servos.timestamp) < 100_ms) {
-			// Apply hinge trim correction to left and right elevon channels
-			servos.control[0] = math::constrain(servos.control[0] + trim_left, -1.0f, 1.0f);
-			servos.control[2] = math::constrain(servos.control[2] + trim_right, -1.0f, 1.0f);
+			// Only process if this is a NEW sample from ControlAllocator
+			// (different timestamp_sample than what we last processed).
+			// Our own re-published output preserves the original timestamp_sample,
+			// so we correctly skip it.
+			if (servos.timestamp_sample != _last_ca_timestamp_sample) {
+				_last_ca_timestamp_sample = servos.timestamp_sample;
 
-			servos.timestamp = hrt_absolute_time();
-			_actuator_servos_pub.publish(servos);
+				// Apply hinge trim correction to left and right elevon channels
+				servos.control[0] = math::constrain(servos.control[0] + trim_left, -1.0f, 1.0f);
+				servos.control[2] = math::constrain(servos.control[2] + trim_right, -1.0f, 1.0f);
+
+				servos.timestamp = hrt_absolute_time();
+				_actuator_servos_pub.publish(servos);
+			}
 		}
 	}
 
 	// MAVLink communication: publish hinge data and receive master commands
 	if (_param_comm_enable.get() != 0) {
-		publishDebugArray();
+		publishDebugArray(trim_left, trim_right);
 		processMasterCommands();
 	}
 }
@@ -255,7 +267,7 @@ float ChainwingSlave::computeTrim(float angle, float rate)
 	return trim;
 }
 
-void ChainwingSlave::publishDebugArray()
+void ChainwingSlave::publishDebugArray(float trim_left, float trim_right)
 {
 	// Pack hinge status into DEBUG_FLOAT_ARRAY for MAVLink transmission
 	// This gets automatically bridged to MAVLink by the mavlink module's
@@ -270,8 +282,8 @@ void ChainwingSlave::publishDebugArray()
 	dbg.data[1] = _hinge_angle_right;
 	dbg.data[2] = _hinge_rate_left;
 	dbg.data[3] = _hinge_rate_right;
-	dbg.data[4] = computeTrim(_hinge_angle_left, _hinge_rate_left);
-	dbg.data[5] = computeTrim(_hinge_angle_right, _hinge_rate_right);
+	dbg.data[4] = trim_left;
+	dbg.data[5] = trim_right;
 	dbg.data[6] = _ref_initialized ? 1.0f : 0.0f;
 
 	_debug_array_pub.publish(dbg);
