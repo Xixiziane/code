@@ -68,7 +68,7 @@ ChainwingSlave::ChainwingSlave() :
 bool ChainwingSlave::init()
 {
 	ScheduleOnInterval(20000_us); // 50 Hz
-	PX4_INFO("chainwing_slave started (50Hz), CW_SLV_EN=%d", _param_enable.get());
+	PX4_INFO("chainwing_slave started (50Hz), CW_SLV_EN=%ld", (long)_param_enable.get());
 	return true;
 }
 
