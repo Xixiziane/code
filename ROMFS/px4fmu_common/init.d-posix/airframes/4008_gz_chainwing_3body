@@ -148,6 +148,11 @@ param set-default CP_DIST -1
 
 # --- Failure Detector ---
 param set-default FD_ESCS_EN 0
+param set-default COM_ARM_CHK_ESCS 0
+
+# --- Airspeed preflight checks (disable for SITL robustness) ---
+param set-default COM_ARM_ARSP_EN 0
+param set-default CBRK_AIRSPD_CHK 162128
 
 # --- RC Input ---
 param set-default COM_RC_IN_MODE 3

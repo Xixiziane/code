@@ -875,7 +875,7 @@
           <iyz>0.0</iyz>
           <izz>0.000001</izz>
         </inertia>
-        <pose relative_to='left_unit'>0 0 0 0 0 0</pose>
+        <pose>0 0 0 0 0 0</pose>
       </inertial>
       <visual name='left_elevon_visual'>
         <pose relative_to='left_unit'>-0.50 0 0 0 0 0</pose>
@@ -971,7 +971,7 @@
           <iyz>0.0</iyz>
           <izz>0.000001</izz>
         </inertia>
-        <pose relative_to='right_unit'>0 0 0 0 0 0</pose>
+        <pose>0 0 0 0 0 0</pose>
       </inertial>
       <visual name='right_elevon_visual'>
         <pose relative_to='right_unit'>-0.50 0 0 0 0 0</pose>
