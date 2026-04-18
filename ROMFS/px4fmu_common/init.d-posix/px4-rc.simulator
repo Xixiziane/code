@@ -71,7 +71,13 @@ elif [ "$PX4_SIMULATOR" = "gz" ] || [ "$(param show -q SIM_GZ_EN)" -eq "1" ]; th
 		if [ -z "${HEADLESS}" ]; then
 			# HEADLESS not set, starting gui
 			if [ -z "${PX4_GZ_GUI_CONFIG}" ] && [ -n "${PX4_GZ_GUI_CONFIG_BASENAME}" ] && [ -n "${PX4_GZ_WORLDS}" ]; then
-				PX4_GZ_GUI_CONFIG="${PX4_GZ_WORLDS%/worlds}/gui/${PX4_GZ_GUI_CONFIG_BASENAME}"
+				gz_worlds_dir="${PX4_GZ_WORLDS%/}"
+
+				case "${gz_worlds_dir}" in
+					*/worlds)
+						PX4_GZ_GUI_CONFIG="${gz_worlds_dir%/worlds}/gui/${PX4_GZ_GUI_CONFIG_BASENAME}"
+						;;
+				esac
 			fi
 
 			if [ -n "${PX4_GZ_GUI_CONFIG}" ] && [ -f "${PX4_GZ_GUI_CONFIG}" ]; then
