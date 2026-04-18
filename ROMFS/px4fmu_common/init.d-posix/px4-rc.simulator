@@ -102,9 +102,12 @@ elif [ "$PX4_SIMULATOR" = "gz" ] || [ "$(param show -q SIM_GZ_EN)" -eq "1" ]; th
 					(
 						# Wait for the GUI + CameraTracking plugin to finish initialization before publishing.
 						sleep "${gui_follow_startup_delay_s}"
-						${gz_command} topic -t /gui/track -m gz.msgs.CameraTrack -p \
-							"track_mode: 2, follow_target: {name: \"${follow_target}\"}, follow_offset: {x: ${follow_offset_x}, y: ${follow_offset_y}, z: ${follow_offset_z}}"
-					) >/dev/null 2>&1 &
+						if ! ${gz_command} topic -t /gui/track -m gz.msgs.CameraTrack -p \
+							"track_mode: 2, follow_target: {name: \"${follow_target}\"}, follow_offset: {x: ${follow_offset_x}, y: ${follow_offset_y}, z: ${follow_offset_z}}" \
+							>/dev/null 2>&1; then
+							echo "WARN  [init] failed to publish gazebo follow camera command for target: ${follow_target}"
+						fi
+					) &
 				fi
 			fi
 		fi
