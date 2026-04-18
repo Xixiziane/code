@@ -70,7 +70,41 @@ elif [ "$PX4_SIMULATOR" = "gz" ] || [ "$(param show -q SIM_GZ_EN)" -eq "1" ]; th
 
 		if [ -z "${HEADLESS}" ]; then
 			# HEADLESS not set, starting gui
-			${gz_command} ${gz_sub_command} -g &
+			if [ -z "${PX4_GZ_GUI_CONFIG}" ] && [ -n "${PX4_GZ_GUI_CONFIG_BASENAME}" ] && [ -n "${PX4_GZ_WORLDS}" ]; then
+				PX4_GZ_GUI_CONFIG="${PX4_GZ_WORLDS%/worlds}/gui/${PX4_GZ_GUI_CONFIG_BASENAME}"
+			fi
+
+			if [ -n "${PX4_GZ_GUI_CONFIG}" ] && [ -f "${PX4_GZ_GUI_CONFIG}" ]; then
+				echo "INFO  [init] starting gazebo gui with config: ${PX4_GZ_GUI_CONFIG}"
+				${gz_command} ${gz_sub_command} -g --gui-config "${PX4_GZ_GUI_CONFIG}" &
+			else
+				${gz_command} ${gz_sub_command} -g &
+			fi
+
+			if [ "${PX4_GZ_GUI_FOLLOW}" = "1" ]; then
+				follow_target="${PX4_GZ_GUI_FOLLOW_TARGET}"
+
+				if [ -z "${follow_target}" ] && [ -n "${PX4_SIM_MODEL}" ]; then
+					follow_target="${PX4_SIM_MODEL#*gz_}"
+
+					if [ -n "${px4_instance}" ]; then
+						follow_target="${follow_target}_${px4_instance}"
+					fi
+				fi
+
+				if [ -n "${follow_target}" ]; then
+					follow_offset_x="${PX4_GZ_GUI_FOLLOW_OFFSET_X:--3.0}"
+					follow_offset_y="${PX4_GZ_GUI_FOLLOW_OFFSET_Y:-0.0}"
+					follow_offset_z="${PX4_GZ_GUI_FOLLOW_OFFSET_Z:-2.0}"
+
+					echo "INFO  [init] enabling gazebo follow camera target: ${follow_target} offset: ${follow_offset_x} ${follow_offset_y} ${follow_offset_z}"
+					(
+						sleep 3
+						${gz_command} topic -t /gui/track -m gz.msgs.CameraTrack -p \
+							"track_mode: 2, follow_target: {name: \"${follow_target}\"}, follow_offset: {x: ${follow_offset_x}, y: ${follow_offset_y}, z: ${follow_offset_z}}"
+					) >/dev/null 2>&1 &
+				fi
+			fi
 		fi
 
 	else
